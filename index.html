@@ -280,12 +280,35 @@
 
                 const fetchLogAutomatically = async () => {
                     try {
+                        // 尝试读取日志文件
                         const res = await fetch('./service_start_log.txt');
-                        if (!res.ok) throw new Error('File not found');
-                        const text = await res.text();
-                        applyConfig(text);
+                        if (res.ok) {
+                            const text = await res.text();
+                            applyConfig(text);
+                            return; // 成功解析则返回
+                        }
                     } catch (err) {
-                        console.warn('Cannot fetch log automatically, waiting for user input.');
+                        console.warn('Cannot fetch log automatically, fallback to direct API query.');
+                    }
+
+                    // 如果读取日志失败，直接尝试向 API 获取模型信息
+                    try {
+                        const apiRes = await fetch(`${config.apiBase}/models`);
+                        if (apiRes.ok) {
+                            const data = await apiRes.json();
+                            if (data && data.data && data.data.length > 0) {
+                                const modelInfo = data.data[0];
+                                config.model = modelInfo.id || 'qwen';
+                                if (modelInfo.max_model_len) {
+                                    config.maxModelLen = modelInfo.max_model_len;
+                                    params.max_tokens = Math.min(params.max_tokens, config.maxModelLen);
+                                }
+                                initialized.value = true;
+                                return;
+                            }
+                        }
+                    } catch (apiErr) {
+                        console.warn('Failed to fetch model info from API directly:', apiErr);
                     }
                 };
 
