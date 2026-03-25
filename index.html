@@ -123,8 +123,8 @@
     </style>
   </head>
 
-  <body class="h-screen flex flex-col overflow-hidden text-gray-800">
-    <div id="app" class="h-full flex flex-col max-w-7xl mx-auto w-full shadow-xl bg-white relative">
+  <body class="h-screen w-screen flex flex-col overflow-hidden text-gray-800 m-0 p-0">
+    <div id="app" class="h-full w-full flex flex-col shadow-xl bg-white relative">
       <!-- Setup Modal (Shown if log not found automatically) -->
       <div
         v-if="!initialized"
@@ -466,144 +466,43 @@
 
         <!-- Messages List -->
         <div
-          class="flex-1 flex flex-col p-4 overflow-y-auto relative pr-8"
+          class="flex-1 flex flex-col p-4 md:p-8 overflow-y-auto relative pr-8 md:pr-12 scroll-smooth"
           ref="chatContainer"
           @scroll="handleScroll"
         >
           <div
             v-if="messages.length === 0"
-            class="flex-1 flex items-center justify-center text-gray-400 text-lg"
+            class="flex-1 flex items-center justify-center text-gray-400 text-lg md:text-xl h-full min-h-[50vh]"
           >
             开始输入以与 Qwen 模型对话...
           </div>
 
-          <div
-            v-for="(msg, index) in messages"
-            :key="index"
-            :id="'msg-' + index"
-            class="mb-6 flex group"
-            :class="msg.role === 'user' ? 'justify-end' : 'justify-start'"
-          >
-            <!-- User message copy button (outside bubble, left side) -->
+          <div class="max-w-5xl mx-auto w-full">
             <div
-              v-if="msg.role === 'user'"
-              class="flex flex-col justify-start mr-2 opacity-0 group-hover:opacity-100 transition-opacity"
+              v-for="(msg, index) in messages"
+              :key="index"
+              :id="'msg-' + index"
+              class="mb-6 md:mb-8 flex group"
+              :class="msg.role === 'user' ? 'justify-end' : 'justify-start'"
             >
-              <button
-                @click="copyToClipboard(msg)"
-                class="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100"
-                title="复制"
-              >
-                <span v-if="msg.copied" class="text-xs text-green-600 font-medium whitespace-nowrap"
-                  >已复制</span
-                >
-                <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                  ></path>
-                </svg>
-              </button>
-            </div>
-
-            <!-- The Bubble Container -->
-            <div
-              class="max-w-[85%] relative flex flex-col"
-              :class="msg.role === 'user' ? 'items-end' : 'items-start w-full'"
-            >
-              <!-- The Bubble -->
+              <!-- User message copy button (outside bubble, left side) -->
               <div
-                class="rounded-lg p-4 shadow-sm w-full"
-                :class="msg.role === 'user' ? 'bg-blue-100 text-blue-900' : 'bg-white border border-gray-200'"
-              >
-                <div class="font-bold text-xs mb-1 text-gray-500 uppercase tracking-wider">
-                  {{ msg.role === 'user' ? 'You' : 'Qwen' }}
-                </div>
-
-                <!-- Thinking Section -->
-                <div
-                  v-if="msg.role === 'assistant' && msg.thinking"
-                  class="mb-3 border border-gray-100 bg-gray-50 rounded-md"
-                >
-                  <button
-                    @click="msg.showThinking = !msg.showThinking"
-                    class="w-full px-3 py-2 flex items-center justify-between text-xs font-medium text-gray-500 hover:bg-gray-100 transition-colors rounded-md focus:outline-none"
-                  >
-                    <div class="flex items-center gap-2">
-                      <div v-if="msg.isThinking" class="spinner"></div>
-                      <span>{{ msg.isThinking ? '思考中...' : '查看思考过程' }}</span>
-                    </div>
-                    <!-- Arrow: Right when collapsed, Down when expanded -->
-                    <svg
-                      class="w-4 h-4 transform transition-transform duration-300"
-                      :class="msg.showThinking ? 'rotate-90' : 'rotate-0'"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M9 5l7 7-7 7"
-                      ></path>
-                    </svg>
-                  </button>
-                  <div
-                    class="think-content px-3 text-xs text-gray-600 border-t border-gray-100"
-                    :class="msg.showThinking ? 'expanded py-2' : 'collapsed'"
-                  >
-                    <div v-html="renderMarkdown(msg.thinking)"></div>
-                  </div>
-                </div>
-
-                <div
-                  class="message-content text-sm leading-relaxed"
-                  v-html="renderMarkdown(msg.content)"
-                ></div>
-
-                <!-- Error State -->
-                <div
-                  v-if="msg.error"
-                  class="mt-2 text-red-500 text-sm font-semibold flex items-center gap-2"
-                >
-                  <span>{{ msg.error }}</span>
-                  <button @click="retryMessage(index)" class="underline hover:text-red-700">
-                    重试
-                  </button>
-                </div>
-
-                <!-- Usage Stats -->
-                <div
-                  v-if="msg.usage && !msg.error"
-                  class="mt-2 pt-2 border-t border-gray-100 text-xs text-gray-400 flex gap-3"
-                >
-                  <span title="Prompt Tokens">Prompt: {{ msg.usage.prompt_tokens }}</span>
-                  <span title="Completion Tokens"
-                    >Completion: {{ msg.usage.completion_tokens }}</span
-                  >
-                  <span title="Total Tokens" class="font-semibold text-gray-500"
-                    >Total: {{ msg.usage.total_tokens }}</span
-                  >
-                  <span v-if="msg.ttft" title="Time to First Token">TTFT: {{ msg.ttft }}ms</span>
-                </div>
-              </div>
-
-              <!-- Assistant message copy button (outside bubble, bottom left) -->
-              <div
-                v-if="msg.role === 'assistant' && !msg.error && msg.content"
-                class="mt-1 flex justify-start opacity-0 group-hover:opacity-100 transition-opacity"
+                v-if="msg.role === 'user'"
+                class="flex flex-col justify-start mr-2 md:mr-3 opacity-0 group-hover:opacity-100 transition-opacity"
               >
                 <button
                   @click="copyToClipboard(msg)"
-                  class="flex items-center gap-1 p-1 rounded-md text-xs text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-                  title="复制响应"
+                  class="p-1.5 md:p-2 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                  title="复制"
                 >
+                  <span
+                    v-if="msg.copied"
+                    class="text-xs text-green-600 font-medium whitespace-nowrap"
+                    >已复制</span
+                  >
                   <svg
-                    v-if="!msg.copied"
-                    class="w-3.5 h-3.5"
+                    v-else
+                    class="w-4 h-4 md:w-5 md:h-5"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -615,26 +514,139 @@
                       d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
                     ></path>
                   </svg>
-                  <span v-if="msg.copied" class="text-green-600 font-medium">已复制</span>
-                  <span v-else>复制</span>
                 </button>
               </div>
-            </div>
-          </div>
 
-          <!-- Typing Indicator -->
-          <div v-if="isGenerating" class="flex justify-start mb-6">
-            <div
-              class="bg-white border border-gray-200 rounded-lg p-4 shadow-sm flex items-center gap-3"
-            >
-              <div class="spinner"></div>
-              <span class="text-sm text-gray-500">Qwen 正在思考...</span>
-              <button
-                @click="stopGeneration"
-                class="ml-4 text-xs bg-red-100 text-red-600 px-2 py-1 rounded hover:bg-red-200 transition-colors"
+              <!-- The Bubble Container -->
+              <div
+                class="max-w-[90%] md:max-w-[85%] relative flex flex-col"
+                :class="msg.role === 'user' ? 'items-end' : 'items-start w-full'"
               >
-                停止生成
-              </button>
+                <!-- The Bubble -->
+                <div
+                  class="rounded-xl md:rounded-2xl p-4 md:p-6 shadow-sm w-full text-base"
+                  :class="msg.role === 'user' ? 'bg-blue-100 text-blue-900' : 'bg-white border border-gray-200'"
+                >
+                  <div
+                    class="font-bold text-xs md:text-sm mb-2 text-gray-500 uppercase tracking-wider"
+                  >
+                    {{ msg.role === 'user' ? 'You' : 'Qwen' }}
+                  </div>
+
+                  <!-- Thinking Section -->
+                  <div
+                    v-if="msg.role === 'assistant' && msg.thinking"
+                    class="mb-4 border border-gray-100 bg-gray-50 rounded-lg"
+                  >
+                    <button
+                      @click="msg.showThinking = !msg.showThinking"
+                      class="w-full px-4 py-2.5 flex items-center justify-between text-sm font-medium text-gray-500 hover:bg-gray-100 transition-colors rounded-lg focus:outline-none"
+                    >
+                      <div class="flex items-center gap-2">
+                        <div v-if="msg.isThinking" class="spinner"></div>
+                        <span>{{ msg.isThinking ? '思考中...' : '查看思考过程' }}</span>
+                      </div>
+                      <!-- Arrow: Right when collapsed, Down when expanded -->
+                      <svg
+                        class="w-4 h-4 transform transition-transform duration-300"
+                        :class="msg.showThinking ? 'rotate-90' : 'rotate-0'"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M9 5l7 7-7 7"
+                        ></path>
+                      </svg>
+                    </button>
+                    <div
+                      class="think-content px-4 text-sm text-gray-600 border-t border-gray-100"
+                      :class="msg.showThinking ? 'expanded py-3' : 'collapsed'"
+                    >
+                      <div v-html="renderMarkdown(msg.thinking)"></div>
+                    </div>
+                  </div>
+
+                  <div
+                    class="message-content text-base md:text-[1.05rem] leading-relaxed break-words"
+                    v-html="renderMarkdown(msg.content)"
+                  ></div>
+
+                  <!-- Error State -->
+                  <div
+                    v-if="msg.error"
+                    class="mt-3 text-red-500 text-sm font-semibold flex items-center gap-2"
+                  >
+                    <span>{{ msg.error }}</span>
+                    <button @click="retryMessage(index)" class="underline hover:text-red-700">
+                      重试
+                    </button>
+                  </div>
+
+                  <!-- Usage Stats -->
+                  <div
+                    v-if="msg.usage && !msg.error"
+                    class="mt-3 pt-3 border-t border-gray-100 text-xs md:text-sm text-gray-400 flex flex-wrap gap-4"
+                  >
+                    <span title="Prompt Tokens">Prompt: {{ msg.usage.prompt_tokens }}</span>
+                    <span title="Completion Tokens"
+                      >Completion: {{ msg.usage.completion_tokens }}</span
+                    >
+                    <span title="Total Tokens" class="font-semibold text-gray-500"
+                      >Total: {{ msg.usage.total_tokens }}</span
+                    >
+                    <span v-if="msg.ttft" title="Time to First Token">TTFT: {{ msg.ttft }}ms</span>
+                  </div>
+                </div>
+
+                <!-- Assistant message copy button (outside bubble, bottom left) -->
+                <div
+                  v-if="msg.role === 'assistant' && !msg.error && msg.content"
+                  class="mt-1.5 flex justify-start opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <button
+                    @click="copyToClipboard(msg)"
+                    class="flex items-center gap-1.5 p-1.5 rounded-md text-xs md:text-sm text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                    title="复制响应"
+                  >
+                    <svg
+                      v-if="!msg.copied"
+                      class="w-4 h-4 md:w-4.5 md:h-4.5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                      ></path>
+                    </svg>
+                    <span v-if="msg.copied" class="text-green-600 font-medium">已复制</span>
+                    <span v-else>复制</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Typing Indicator -->
+            <div v-if="isGenerating" class="flex justify-start mb-8">
+              <div
+                class="bg-white border border-gray-200 rounded-xl md:rounded-2xl p-4 md:p-6 shadow-sm flex items-center gap-3 w-full md:w-auto min-w-[200px]"
+              >
+                <div class="spinner"></div>
+                <span class="text-sm md:text-base text-gray-500">Qwen 正在思考...</span>
+                <button
+                  @click="stopGeneration"
+                  class="ml-auto md:ml-6 text-xs md:text-sm bg-red-100 text-red-600 px-3 py-1.5 rounded hover:bg-red-200 transition-colors"
+                >
+                  停止生成
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -668,24 +680,24 @@
 
       <!-- Input Area -->
       <footer
-        class="bg-white p-4 border-t border-gray-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]"
+        class="bg-white p-4 md:p-6 border-t border-gray-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-10 relative"
       >
-        <div class="max-w-4xl mx-auto">
+        <div class="max-w-5xl mx-auto w-full">
           <!-- Media Preview Area -->
-          <div v-if="pendingMedia.length > 0" class="flex flex-wrap gap-2 mb-2">
+          <div v-if="pendingMedia.length > 0" class="flex flex-wrap gap-2 mb-3">
             <div v-for="(media, idx) in pendingMedia" :key="idx" class="relative group">
               <div
                 v-if="media.type === 'image'"
-                class="w-16 h-16 rounded-md overflow-hidden border border-gray-200"
+                class="w-16 h-16 md:w-20 md:h-20 rounded-lg overflow-hidden border border-gray-200 shadow-sm"
               >
                 <img :src="media.url" class="w-full h-full object-cover" />
               </div>
               <div
                 v-else-if="media.type === 'video'"
-                class="w-16 h-16 rounded-md overflow-hidden border border-gray-200 bg-black flex items-center justify-center"
+                class="w-16 h-16 md:w-20 md:h-20 rounded-lg overflow-hidden border border-gray-200 bg-black flex items-center justify-center shadow-sm"
               >
                 <svg
-                  class="w-6 h-6 text-white"
+                  class="w-8 h-8 text-white"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -706,9 +718,14 @@
               </div>
               <button
                 @click="removePendingMedia(idx)"
-                class="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                class="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-all shadow-md"
               >
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg
+                  class="w-3 h-3 md:w-4 md:h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
                   <path
                     stroke-linecap="round"
                     stroke-linejoin="round"
@@ -721,17 +738,24 @@
           </div>
 
           <!-- Upload Error Message -->
-          <div v-if="mediaError" class="text-red-500 text-xs mb-2">{{ mediaError }}</div>
+          <div v-if="mediaError" class="text-red-500 text-sm mb-3 font-medium">
+            {{ mediaError }}
+          </div>
 
-          <form @submit.prevent="sendMessage" class="flex gap-2">
+          <form @submit.prevent="sendMessage" class="flex gap-3 items-end">
             <!-- Media Upload Button -->
             <button
               type="button"
               @click="$refs.mediaInput.click()"
-              class="p-3 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent hover:border-blue-100"
+              class="p-3 md:p-4 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors border border-transparent hover:border-blue-100 flex-shrink-0"
               title="上传图片或视频"
             >
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg
+                class="w-6 h-6 md:w-7 md:h-7"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
                 <path
                   stroke-linecap="round"
                   stroke-linejoin="round"
@@ -749,21 +773,29 @@
               multiple
             />
 
-            <input
-              type="text"
-              v-model="inputPrompt"
-              placeholder="输入提示词..."
-              class="flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-              :disabled="isGenerating"
-              autocomplete="off"
-            />
+            <div class="flex-1 relative">
+              <textarea
+                v-model="inputPrompt"
+                @keydown.enter.exact.prevent="sendMessage"
+                placeholder="输入提示词... (Enter 发送, Shift+Enter 换行)"
+                class="w-full border border-gray-300 rounded-xl px-4 py-3 md:py-4 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base resize-none overflow-y-auto max-h-48 min-h-[56px] shadow-sm"
+                :disabled="isGenerating"
+                rows="1"
+              ></textarea>
+            </div>
+
             <button
               type="submit"
-              class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              class="bg-blue-600 hover:bg-blue-700 text-white px-6 md:px-8 py-3 md:py-4 rounded-xl font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 flex-shrink-0 shadow-md hover:shadow-lg"
               :disabled="(!inputPrompt.trim() && pendingMedia.length === 0) || isGenerating"
             >
-              发送
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <span class="hidden md:inline text-lg">发送</span>
+              <svg
+                class="w-5 h-5 md:w-6 md:h-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
                 <path
                   stroke-linecap="round"
                   stroke-linejoin="round"
@@ -1370,6 +1402,21 @@
             }
           };
 
+          const adjustTextareaHeight = () => {
+            const textarea = document.querySelector('textarea');
+            if (textarea) {
+              textarea.style.height = 'auto';
+              textarea.style.height = textarea.scrollHeight + 'px';
+            }
+          };
+
+          // Watch inputPrompt to adjust textarea height
+          Vue.watch(inputPrompt, () => {
+            nextTick(() => {
+              adjustTextareaHeight();
+            });
+          });
+
           const sendMessage = () => {
             const prompt = inputPrompt.value.trim();
             const mediaItems = [...pendingMedia.value]; // Copy current pending media
@@ -1378,6 +1425,10 @@
 
             inputPrompt.value = '';
             pendingMedia.value = []; // Clear pending media after sending
+
+            nextTick(() => {
+              adjustTextareaHeight();
+            });
 
             performRequest(prompt, mediaItems);
           };
