@@ -1,0 +1,17 @@
+{
+  "name": "qwen-vllm-web",
+  "version": "1.0.0",
+  "description": "Web UI for Qwen vLLM",
+  "scripts": {
+    "test": "vitest run --coverage",
+    "lint": "eslint . --ext .js,.html",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^1.4.0",
+    "eslint": "^8.57.0",
+    "eslint-plugin-html": "^8.1.4",
+    "prettier": "^3.2.5",
+    "vitest": "^1.4.0"
+  }
+}

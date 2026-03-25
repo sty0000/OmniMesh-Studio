@@ -1,0 +1,25 @@
+{
+  "env": {
+    "browser": true,
+    "es2021": true,
+    "node": true,
+    "jest": true
+  },
+  "extends": "eslint:recommended",
+  "plugins": ["html"],
+  "ignorePatterns": ["coverage/", "dist/"],
+  "globals": {
+    "Vue": "readonly",
+    "marked": "readonly",
+    "parseServiceLog": "readonly",
+    "validateParams": "readonly",
+    "parseSSE": "readonly"
+  },
+  "parserOptions": {
+    "ecmaVersion": 12,
+    "sourceType": "module"
+  },
+  "rules": {
+    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }]
+  }
+}
