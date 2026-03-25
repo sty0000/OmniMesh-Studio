@@ -243,7 +243,7 @@
       </header>
 
       <!-- Main Chat Area -->
-      <main class="flex-1 flex overflow-hidden bg-gray-50">
+      <main class="flex-1 flex overflow-hidden bg-gray-50 relative">
         <!-- Sidebar for Settings -->
         <aside
           class="w-72 bg-white border-r border-gray-200 p-4 flex flex-col gap-4 overflow-y-auto hidden md:flex flex-shrink-0"
@@ -359,7 +359,11 @@
         </aside>
 
         <!-- Messages List -->
-        <div class="flex-1 flex flex-col p-4 overflow-y-auto" ref="chatContainer">
+        <div
+          class="flex-1 flex flex-col p-4 overflow-y-auto relative pr-8"
+          ref="chatContainer"
+          @scroll="handleScroll"
+        >
           <div
             v-if="messages.length === 0"
             class="flex-1 flex items-center justify-center text-gray-400 text-lg"
@@ -370,6 +374,7 @@
           <div
             v-for="(msg, index) in messages"
             :key="index"
+            :id="'msg-' + index"
             class="mb-6 flex group"
             :class="msg.role === 'user' ? 'justify-end' : 'justify-start'"
           >
@@ -526,6 +531,32 @@
               </button>
             </div>
           </div>
+        </div>
+
+        <!-- Quick Navigation Dots -->
+        <div
+          class="absolute right-1 top-1/2 transform -translate-y-1/2 flex flex-col gap-2 z-20 pointer-events-auto"
+        >
+          <template v-for="(msg, index) in messages" :key="'nav-'+index">
+            <div
+              v-if="msg.role === 'user'"
+              class="group/nav relative flex items-center justify-center w-6 h-6 cursor-pointer"
+              @click="scrollToMessage(index)"
+            >
+              <!-- The Dot -->
+              <div
+                class="w-2 h-2 rounded-full transition-all duration-300"
+                :class="activeMessageIndex === index ? 'bg-blue-600 scale-150' : 'bg-gray-300 hover:bg-blue-400 hover:scale-125'"
+              ></div>
+              <!-- Tooltip -->
+              <div
+                class="absolute right-8 top-1/2 -translate-y-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover/nav:opacity-100 transition-opacity whitespace-nowrap max-w-[150px] truncate pointer-events-none"
+              >
+                {{ msg.content ? (typeof msg.content === 'string' ? msg.content : '多模态提问') :
+                '[空]' }}
+              </div>
+            </div>
+          </template>
         </div>
       </main>
 
@@ -687,6 +718,7 @@
           const inputPrompt = ref('');
           const isGenerating = ref(false);
           const chatContainer = ref(null);
+          const activeMessageIndex = ref(-1);
 
           // Session Management
           const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -799,6 +831,68 @@
             await nextTick();
             if (chatContainer.value) {
               chatContainer.value.scrollTop = chatContainer.value.scrollHeight;
+              updateActiveMessageIndex();
+            }
+          };
+
+          const scrollToMessage = (index) => {
+            const el = document.getElementById('msg-' + index);
+            if (el && chatContainer.value) {
+              // Scroll the element into view smoothly
+              chatContainer.value.scrollTo({
+                top: el.offsetTop - chatContainer.value.offsetTop - 20,
+                behavior: 'smooth',
+              });
+              activeMessageIndex.value = index;
+            }
+          };
+
+          // Throttled scroll handler to update active dot
+          let scrollTimeout;
+          const handleScroll = () => {
+            if (scrollTimeout) return;
+            scrollTimeout = setTimeout(() => {
+              updateActiveMessageIndex();
+              scrollTimeout = null;
+            }, 100);
+          };
+
+          const updateActiveMessageIndex = () => {
+            if (!chatContainer.value) return;
+
+            const containerTop = chatContainer.value.scrollTop;
+            const containerHeight = chatContainer.value.clientHeight;
+            const containerBottom = containerTop + containerHeight;
+
+            // Find the user message that is most visible or closest to top
+            let bestIndex = -1;
+            let minDistance = Infinity;
+
+            for (let i = 0; i < messages.value.length; i++) {
+              if (messages.value[i].role === 'user') {
+                const el = document.getElementById('msg-' + i);
+                if (el) {
+                  const elTop = el.offsetTop - chatContainer.value.offsetTop;
+                  const elBottom = elTop + el.offsetHeight;
+
+                  // Check if element is in viewport
+                  if (elTop < containerBottom && elBottom > containerTop) {
+                    // Calculate distance from center of viewport
+                    const viewportCenter = containerTop + containerHeight / 2;
+                    const elCenter = elTop + el.offsetHeight / 2;
+                    const distance = Math.abs(viewportCenter - elCenter);
+
+                    if (distance < minDistance) {
+                      minDistance = distance;
+                      bestIndex = i;
+                    }
+                  }
+                }
+              }
+            }
+
+            if (bestIndex !== -1) {
+              activeMessageIndex.value = bestIndex;
             }
           };
 
@@ -1211,6 +1305,9 @@
             inputPrompt,
             isGenerating,
             chatContainer,
+            activeMessageIndex,
+            scrollToMessage,
+            handleScroll,
             pendingMedia,
             mediaError,
             handleMediaUpload,
