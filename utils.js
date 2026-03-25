@@ -12,9 +12,15 @@ function parseServiceLog(logText) {
   };
 
   // Extract model name
-  const modelMatch = logText.match(/(?:--model\s+|model=|model\s*[:=]\s*['"]?)([\w./-]+)/i);
-  if (modelMatch && modelMatch[1]) {
-    config.model = modelMatch[1].replace(/['"]/g, '');
+  // Prefer --served-model-name if it exists, otherwise fallback to --model
+  const servedModelMatch = logText.match(/(?:--served-model-name\s+)([\w./-]+)/i);
+  if (servedModelMatch && servedModelMatch[1]) {
+    config.model = servedModelMatch[1].replace(/['"]/g, '');
+  } else {
+    const modelMatch = logText.match(/(?:--model\s+|model=|model\s*[:=]\s*['"]?)([\w./-]+)/i);
+    if (modelMatch && modelMatch[1]) {
+      config.model = modelMatch[1].replace(/['"]/g, '');
+    }
   }
 
   // Extract max model length

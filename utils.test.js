@@ -10,6 +10,13 @@ describe('parseServiceLog', () => {
     expect(result.apiBase).toBe('http://localhost:8000/v1');
   });
 
+  it('should parse --served-model-name syntax correctly and prioritize it', () => {
+    const log = `python -m vllm.entrypoints.openai.api_server --model /path/to/model --served-model-name qwen-custom --max-model-len 65536`;
+    const result = parseServiceLog(log);
+    expect(result.model).toBe('qwen-custom');
+    expect(result.maxModelLen).toBe(65536);
+  });
+
   it('should parse --model syntax correctly', () => {
     const log = `python -m vllm.entrypoints.openai.api_server --model Qwen1.5-14B-Chat --max-model-len 8192 --api-key sk-12345`;
     const result = parseServiceLog(log);

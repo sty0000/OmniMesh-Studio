@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
+
+<head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Qwen vLLM Web UI</title>
@@ -13,537 +14,476 @@
     <!-- Load Utils -->
     <script src="./utils.js"></script>
     <style>
-      body {
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        background-color: #f3f4f6;
-      }
-      .message-content pre {
-        background: #1e1e1e;
-        color: #d4d4d4;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        overflow-x: auto;
-        margin-top: 0.5rem;
-      }
-      .message-content code {
-        font-family: Consolas, monospace;
-      }
-      .message-content p {
-        margin-bottom: 0.5rem;
-      }
-      .message-content p:last-child {
-        margin-bottom: 0;
-      }
-      /* Scrollbar styles */
-      ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-      }
-      ::-webkit-scrollbar-track {
-        background: #f1f1f1;
-        border-radius: 4px;
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #c1c1c1;
-        border-radius: 4px;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #a8a8a8;
-      }
-      .spinner {
-        border: 3px solid rgba(0, 0, 0, 0.1);
-        width: 20px;
-        height: 20px;
-        border-radius: 50%;
-        border-left-color: #3b82f6;
-        animation: spin 1s linear infinite;
-      }
-      @keyframes spin {
-        0% {
-          transform: rotate(0deg);
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f3f4f6;
         }
-        100% {
-          transform: rotate(360deg);
+
+        .message-content pre {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            overflow-x: auto;
+            margin-top: 0.5rem;
         }
-      }
+
+        .message-content code {
+            font-family: Consolas, monospace;
+        }
+
+        .message-content p {
+            margin-bottom: 0.5rem;
+        }
+
+        .message-content p:last-child {
+            margin-bottom: 0;
+        }
+
+        /* Scrollbar styles */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+
+        .spinner {
+            border: 3px solid rgba(0, 0, 0, 0.1);
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border-left-color: #3b82f6;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
     </style>
-  </head>
-  <body class="h-screen flex flex-col overflow-hidden text-gray-800">
+</head>
+
+<body class="h-screen flex flex-col overflow-hidden text-gray-800">
     <div id="app" class="h-full flex flex-col max-w-7xl mx-auto w-full shadow-xl bg-white relative">
-      <!-- Setup Modal (Shown if log not found automatically) -->
-      <div
-        v-if="!initialized"
-        class="absolute inset-0 z-50 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4"
-      >
-        <div class="bg-white rounded-lg p-6 max-w-md w-full shadow-2xl">
-          <h2 class="text-2xl font-bold mb-4">初始化服务配置</h2>
-          <p class="text-sm text-gray-600 mb-4">
-            无法自动读取
-            <code class="bg-gray-100 px-1 rounded">service_start_log.txt</code
-            >。请手动选择该文件，或确保已通过本地服务器访问并存放于同目录。
-          </p>
+        <!-- Setup Modal (Shown if log not found automatically) -->
+        <div v-if="!initialized"
+            class="absolute inset-0 z-50 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4">
+            <div class="bg-white rounded-lg p-6 max-w-md w-full shadow-2xl">
+                <h2 class="text-2xl font-bold mb-4">初始化服务配置</h2>
+                <p class="text-sm text-gray-600 mb-4">
+                    无法自动读取
+                    <code class="bg-gray-100 px-1 rounded">service_start_log.txt</code>。请手动选择该文件，或确保已通过本地服务器访问并存放于同目录。
+                </p>
 
-          <input
-            type="file"
-            @change="handleFileUpload"
-            accept=".txt"
-            class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer border rounded-lg p-2 mb-4"
-          />
+                <input type="file" @change="handleFileUpload" accept=".txt"
+                    class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer border rounded-lg p-2 mb-4" />
 
-          <div v-if="initError" class="text-red-500 text-sm mb-4">{{ initError }}</div>
+                <div v-if="initError" class="text-red-500 text-sm mb-4">{{ initError }}</div>
 
-          <button
-            @click="useDefaultConfig"
-            class="w-full text-gray-500 hover:text-gray-700 underline text-sm"
-          >
-            跳过，使用默认配置 (localhost:8000/v1)
-          </button>
-        </div>
-      </div>
-
-      <!-- Header -->
-      <header
-        class="flex-shrink-0 bg-blue-600 text-white p-4 flex justify-between items-center shadow-md z-10"
-      >
-        <div>
-          <h1 class="text-xl font-bold flex items-center gap-2">
-            Qwen vLLM 推理客户端
-            <span class="text-xs bg-blue-800 px-2 py-1 rounded-full"
-              >{{ config.model || '未加载模型' }}</span
-            >
-          </h1>
-          <p class="text-xs text-blue-200 mt-1">
-            API: {{ config.apiBase }} | Max Context: {{ config.maxModelLen }}
-          </p>
-        </div>
-        <div class="flex gap-4 items-center">
-          <label class="flex items-center cursor-pointer gap-2">
-            <span class="text-sm font-medium">多轮对话</span>
-            <div class="relative">
-              <input type="checkbox" v-model="multiTurn" class="sr-only" />
-              <div
-                class="block bg-blue-400 w-10 h-6 rounded-full transition-colors"
-                :class="{'bg-blue-200': multiTurn}"
-              ></div>
-              <div
-                class="dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform"
-                :class="{'transform translate-x-4': multiTurn}"
-              ></div>
-            </div>
-          </label>
-          <button
-            @click="clearChat"
-            class="bg-red-500 hover:bg-red-600 px-3 py-1.5 rounded text-sm font-semibold transition-colors"
-          >
-            清空对话
-          </button>
-        </div>
-      </header>
-
-      <!-- Main Chat Area -->
-      <main class="flex-1 flex overflow-hidden bg-gray-50">
-        <!-- Sidebar for Settings -->
-        <aside
-          class="w-64 bg-white border-r border-gray-200 p-4 flex flex-col gap-4 overflow-y-auto hidden md:flex"
-        >
-          <h3 class="font-bold text-gray-700 border-b pb-2">采样参数</h3>
-
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1"
-              >Temperature ({{ params.temperature }})</label
-            >
-            <input
-              type="range"
-              v-model="params.temperature"
-              min="0"
-              max="2"
-              step="0.1"
-              class="w-full"
-            />
-          </div>
-
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1"
-              >Top P ({{ params.top_p }})</label
-            >
-            <input type="range" v-model="params.top_p" min="0" max="1" step="0.05" class="w-full" />
-          </div>
-
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Max Tokens</label>
-            <input
-              type="number"
-              v-model="params.max_tokens"
-              class="w-full border rounded px-2 py-1 text-sm"
-            />
-          </div>
-
-          <div v-if="config.apiKey" class="mt-4 pt-4 border-t">
-            <p class="text-xs text-green-600 flex items-center gap-1">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M5 13l4 4L19 7"
-                ></path>
-              </svg>
-              已加载 API Key
-            </p>
-          </div>
-        </aside>
-
-        <!-- Messages List -->
-        <div class="flex-1 flex flex-col p-4 overflow-y-auto" ref="chatContainer">
-          <div
-            v-if="messages.length === 0"
-            class="flex-1 flex items-center justify-center text-gray-400 text-lg"
-          >
-            开始输入以与 Qwen 模型对话...
-          </div>
-
-          <div
-            v-for="(msg, index) in messages"
-            :key="index"
-            class="mb-6 flex"
-            :class="msg.role === 'user' ? 'justify-end' : 'justify-start'"
-          >
-            <div
-              class="max-w-[85%] rounded-lg p-4 shadow-sm"
-              :class="msg.role === 'user' ? 'bg-blue-100 text-blue-900' : 'bg-white border border-gray-200'"
-            >
-              <div class="font-bold text-xs mb-1 text-gray-500 uppercase tracking-wider">
-                {{ msg.role === 'user' ? 'You' : 'Qwen' }}
-              </div>
-              <div
-                class="message-content text-sm leading-relaxed"
-                v-html="renderMarkdown(msg.content)"
-              ></div>
-
-              <!-- Error State -->
-              <div
-                v-if="msg.error"
-                class="mt-2 text-red-500 text-sm font-semibold flex items-center gap-2"
-              >
-                <span>{{ msg.error }}</span>
-                <button @click="retryMessage(index)" class="underline hover:text-red-700">
-                  重试
+                <button @click="useDefaultConfig" class="w-full text-gray-500 hover:text-gray-700 underline text-sm">
+                    跳过，使用默认配置 (localhost:8000/v1)
                 </button>
-              </div>
-
-              <!-- Usage Stats -->
-              <div
-                v-if="msg.usage && !msg.error"
-                class="mt-2 pt-2 border-t border-gray-100 text-xs text-gray-400 flex gap-3"
-              >
-                <span title="Prompt Tokens">Prompt: {{ msg.usage.prompt_tokens }}</span>
-                <span title="Completion Tokens">Completion: {{ msg.usage.completion_tokens }}</span>
-                <span title="Total Tokens" class="font-semibold text-gray-500"
-                  >Total: {{ msg.usage.total_tokens }}</span
-                >
-                <span v-if="msg.ttft" title="Time to First Token">TTFT: {{ msg.ttft }}ms</span>
-              </div>
             </div>
-          </div>
-
-          <!-- Typing Indicator -->
-          <div v-if="isGenerating" class="flex justify-start mb-6">
-            <div
-              class="bg-white border border-gray-200 rounded-lg p-4 shadow-sm flex items-center gap-3"
-            >
-              <div class="spinner"></div>
-              <span class="text-sm text-gray-500">Qwen 正在思考...</span>
-              <button
-                @click="stopGeneration"
-                class="ml-4 text-xs bg-red-100 text-red-600 px-2 py-1 rounded hover:bg-red-200 transition-colors"
-              >
-                停止生成
-              </button>
-            </div>
-          </div>
         </div>
-      </main>
 
-      <!-- Input Area -->
-      <footer
-        class="bg-white p-4 border-t border-gray-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]"
-      >
-        <form @submit.prevent="sendMessage" class="flex gap-2 max-w-4xl mx-auto">
-          <input
-            type="text"
-            v-model="inputPrompt"
-            placeholder="输入提示词..."
-            class="flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-            :disabled="isGenerating"
-            autocomplete="off"
-          />
-          <button
-            type="submit"
-            class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-            :disabled="!inputPrompt.trim() || isGenerating"
-          >
-            发送
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-              ></path>
-            </svg>
-          </button>
-        </form>
-      </footer>
+        <!-- Header -->
+        <header class="flex-shrink-0 bg-blue-600 text-white p-4 flex justify-between items-center shadow-md z-10">
+            <div>
+                <h1 class="text-xl font-bold flex items-center gap-2">
+                    Qwen vLLM 推理客户端
+                    <span class="text-xs bg-blue-800 px-2 py-1 rounded-full">{{ config.model || '未加载模型' }}</span>
+                </h1>
+                <p class="text-xs text-blue-200 mt-1">
+                    API: {{ config.apiBase }} | Max Context: {{ config.maxModelLen }}
+                </p>
+            </div>
+            <div class="flex gap-4 items-center">
+                <label class="flex items-center cursor-pointer gap-2">
+                    <span class="text-sm font-medium">多轮对话</span>
+                    <div class="relative">
+                        <input type="checkbox" v-model="multiTurn" class="sr-only" />
+                        <div class="block bg-blue-400 w-10 h-6 rounded-full transition-colors"
+                            :class="{'bg-blue-200': multiTurn}"></div>
+                        <div class="dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform"
+                            :class="{'transform translate-x-4': multiTurn}"></div>
+                    </div>
+                </label>
+                <button @click="clearChat"
+                    class="bg-red-500 hover:bg-red-600 px-3 py-1.5 rounded text-sm font-semibold transition-colors">
+                    清空对话
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Chat Area -->
+        <main class="flex-1 flex overflow-hidden bg-gray-50">
+            <!-- Sidebar for Settings -->
+            <aside
+                class="w-64 bg-white border-r border-gray-200 p-4 flex flex-col gap-4 overflow-y-auto hidden md:flex">
+                <h3 class="font-bold text-gray-700 border-b pb-2">采样参数</h3>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Temperature ({{ params.temperature
+                        }})</label>
+                    <input type="range" v-model="params.temperature" min="0" max="2" step="0.1" class="w-full" />
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Top P ({{ params.top_p }})</label>
+                    <input type="range" v-model="params.top_p" min="0" max="1" step="0.05" class="w-full" />
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Max Tokens</label>
+                    <input type="number" v-model="params.max_tokens" class="w-full border rounded px-2 py-1 text-sm" />
+                </div>
+
+                <div v-if="config.apiKey" class="mt-4 pt-4 border-t">
+                    <p class="text-xs text-green-600 flex items-center gap-1">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7">
+                            </path>
+                        </svg>
+                        已加载 API Key
+                    </p>
+                </div>
+            </aside>
+
+            <!-- Messages List -->
+            <div class="flex-1 flex flex-col p-4 overflow-y-auto" ref="chatContainer">
+                <div v-if="messages.length === 0" class="flex-1 flex items-center justify-center text-gray-400 text-lg">
+                    开始输入以与 Qwen 模型对话...
+                </div>
+
+                <div v-for="(msg, index) in messages" :key="index" class="mb-6 flex"
+                    :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+                    <div class="max-w-[85%] rounded-lg p-4 shadow-sm"
+                        :class="msg.role === 'user' ? 'bg-blue-100 text-blue-900' : 'bg-white border border-gray-200'">
+                        <div class="font-bold text-xs mb-1 text-gray-500 uppercase tracking-wider">
+                            {{ msg.role === 'user' ? 'You' : 'Qwen' }}
+                        </div>
+                        <div class="message-content text-sm leading-relaxed" v-html="renderMarkdown(msg.content)"></div>
+
+                        <!-- Error State -->
+                        <div v-if="msg.error" class="mt-2 text-red-500 text-sm font-semibold flex items-center gap-2">
+                            <span>{{ msg.error }}</span>
+                            <button @click="retryMessage(index)" class="underline hover:text-red-700">
+                                重试
+                            </button>
+                        </div>
+
+                        <!-- Usage Stats -->
+                        <div v-if="msg.usage && !msg.error"
+                            class="mt-2 pt-2 border-t border-gray-100 text-xs text-gray-400 flex gap-3">
+                            <span title="Prompt Tokens">Prompt: {{ msg.usage.prompt_tokens }}</span>
+                            <span title="Completion Tokens">Completion: {{ msg.usage.completion_tokens }}</span>
+                            <span title="Total Tokens" class="font-semibold text-gray-500">Total: {{
+                                msg.usage.total_tokens }}</span>
+                            <span v-if="msg.ttft" title="Time to First Token">TTFT: {{ msg.ttft }}ms</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Typing Indicator -->
+                <div v-if="isGenerating" class="flex justify-start mb-6">
+                    <div class="bg-white border border-gray-200 rounded-lg p-4 shadow-sm flex items-center gap-3">
+                        <div class="spinner"></div>
+                        <span class="text-sm text-gray-500">Qwen 正在思考...</span>
+                        <button @click="stopGeneration"
+                            class="ml-4 text-xs bg-red-100 text-red-600 px-2 py-1 rounded hover:bg-red-200 transition-colors">
+                            停止生成
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Input Area -->
+        <footer class="bg-white p-4 border-t border-gray-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+            <form @submit.prevent="sendMessage" class="flex gap-2 max-w-4xl mx-auto">
+                <input type="text" v-model="inputPrompt" placeholder="输入提示词..."
+                    class="flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                    :disabled="isGenerating" autocomplete="off" />
+                <button type="submit"
+                    class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    :disabled="!inputPrompt.trim() || isGenerating">
+                    发送
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
+                    </svg>
+                </button>
+            </form>
+        </footer>
     </div>
 
     <script>
-      const { createApp, ref, reactive, nextTick, onMounted } = Vue;
+        const { createApp, ref, reactive, nextTick, onMounted } = Vue;
 
-      createApp({
-        setup() {
-          const initialized = ref(false);
-          const initError = ref('');
-          const config = reactive({
-            apiBase: 'http://localhost:8000/v1',
-            model: 'qwen',
-            maxModelLen: 8192,
-            apiKey: '',
-          });
+        createApp({
+            setup() {
+                const initialized = ref(false);
+                const initError = ref('');
+                const config = reactive({
+                    apiBase: 'http://localhost:8000/v1',
+                    model: 'qwen',
+                    maxModelLen: 8192,
+                    apiKey: '',
+                });
 
-          const params = reactive({
-            temperature: 0.7,
-            top_p: 0.9,
-            max_tokens: 1024,
-          });
+                const params = reactive({
+                    temperature: 0.7,
+                    top_p: 0.9,
+                    max_tokens: 1024,
+                });
 
-          const multiTurn = ref(true);
-          const messages = ref([]);
-          const inputPrompt = ref('');
-          const isGenerating = ref(false);
-          const chatContainer = ref(null);
+                const multiTurn = ref(true);
+                const messages = ref([]);
+                const inputPrompt = ref('');
+                const isGenerating = ref(false);
+                const chatContainer = ref(null);
 
-          let abortController = null;
+                let abortController = null;
 
-          const scrollToBottom = async () => {
-            await nextTick();
-            if (chatContainer.value) {
-              chatContainer.value.scrollTop = chatContainer.value.scrollHeight;
-            }
-          };
+                const scrollToBottom = async () => {
+                    await nextTick();
+                    if (chatContainer.value) {
+                        chatContainer.value.scrollTop = chatContainer.value.scrollHeight;
+                    }
+                };
 
-          const applyConfig = (logText) => {
-            const parsed = parseServiceLog(logText);
-            Object.assign(config, parsed);
-            // Also clamp max_tokens if needed
-            params.max_tokens = Math.min(params.max_tokens, config.maxModelLen);
-            initialized.value = true;
-          };
+                const applyConfig = (logText) => {
+                    const parsed = parseServiceLog(logText);
+                    Object.assign(config, parsed);
+                    // Also clamp max_tokens if needed
+                    params.max_tokens = Math.min(params.max_tokens, config.maxModelLen);
+                    initialized.value = true;
+                };
 
-          const fetchLogAutomatically = async () => {
-            try {
-              const res = await fetch('./service_start_log.txt');
-              if (!res.ok) throw new Error('File not found');
-              const text = await res.text();
-              applyConfig(text);
-            } catch (err) {
-              console.warn('Cannot fetch log automatically, waiting for user input.');
-            }
-          };
+                const fetchLogAutomatically = async () => {
+                    try {
+                        const res = await fetch('./service_start_log.txt');
+                        if (!res.ok) throw new Error('File not found');
+                        const text = await res.text();
+                        applyConfig(text);
+                    } catch (err) {
+                        console.warn('Cannot fetch log automatically, waiting for user input.');
+                    }
+                };
 
-          const handleFileUpload = (event) => {
-            const file = event.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = (e) => {
-              applyConfig(e.target.result);
-            };
-            reader.onerror = () => {
-              initError.value = '读取文件失败，请重试';
-            };
-            reader.readAsText(file);
-          };
+                const handleFileUpload = (event) => {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        applyConfig(e.target.result);
+                    };
+                    reader.onerror = () => {
+                        initError.value = '读取文件失败，请重试';
+                    };
+                    reader.readAsText(file);
+                };
 
-          const useDefaultConfig = () => {
-            initialized.value = true;
-          };
+                const useDefaultConfig = () => {
+                    initialized.value = true;
+                };
 
-          onMounted(() => {
-            fetchLogAutomatically();
-          });
+                onMounted(() => {
+                    fetchLogAutomatically();
+                });
 
-          const renderMarkdown = (text) => {
-            if (!text) return '';
-            return marked.parse(text);
-          };
+                const renderMarkdown = (text) => {
+                    if (!text) return '';
+                    return marked.parse(text);
+                };
 
-          const clearChat = () => {
-            messages.value = [];
-          };
+                const clearChat = () => {
+                    messages.value = [];
+                };
 
-          const stopGeneration = () => {
-            if (abortController) {
-              abortController.abort();
-              abortController = null;
-              isGenerating.value = false;
-            }
-          };
+                const stopGeneration = () => {
+                    if (abortController) {
+                        abortController.abort();
+                        abortController = null;
+                        isGenerating.value = false;
+                    }
+                };
 
-          const buildPayload = (promptStr) => {
-            const validParams = validateParams({ ...params, max_model_len: config.maxModelLen });
-            let chatMessages = [];
+                const buildPayload = (promptStr) => {
+                    const validParams = validateParams({ ...params, max_model_len: config.maxModelLen });
+                    let chatMessages = [];
 
-            if (multiTurn.value) {
-              // filter out errors and the currently generating empty assistant message
-              chatMessages = messages.value
-                .filter((m) => !m.error && m.content !== '')
-                .map((m) => ({ role: m.role, content: m.content }));
-            } else {
-              chatMessages.push({ role: 'user', content: promptStr });
-            }
+                    if (multiTurn.value) {
+                        // filter out errors and the currently generating empty assistant message
+                        chatMessages = messages.value
+                            .filter((m) => !m.error && m.content !== '')
+                            .map((m) => ({ role: m.role, content: m.content }));
+                    } else {
+                        chatMessages.push({ role: 'user', content: promptStr });
+                    }
 
-            return {
-              model: config.model,
-              messages: chatMessages,
-              stream: true,
-              ...validParams,
-            };
-          };
+                    return {
+                        model: config.model,
+                        messages: chatMessages,
+                        stream: true,
+                        ...validParams,
+                    };
+                };
 
-          const performRequest = async (promptStr, msgIndexToRetry = null) => {
-            if (isGenerating.value) return;
+                const performRequest = async (promptStr, msgIndexToRetry = null) => {
+                    if (isGenerating.value) return;
 
-            isGenerating.value = true;
-            abortController = new AbortController();
+                    isGenerating.value = true;
+                    abortController = new AbortController();
 
-            let targetIndex;
-            if (msgIndexToRetry !== null) {
-              // We are retrying an assistant message
-              targetIndex = msgIndexToRetry;
-              messages.value[targetIndex] = {
-                role: 'assistant',
-                content: '',
-                usage: null,
-                error: null,
-              };
-            } else {
-              // New message
-              messages.value.push({ role: 'user', content: promptStr });
-              targetIndex =
-                messages.value.push({ role: 'assistant', content: '', usage: null, error: null }) -
-                1;
-            }
+                    let targetIndex;
+                    if (msgIndexToRetry !== null) {
+                        // We are retrying an assistant message
+                        targetIndex = msgIndexToRetry;
+                        messages.value[targetIndex] = {
+                            role: 'assistant',
+                            content: '',
+                            usage: null,
+                            error: null,
+                        };
+                    } else {
+                        // New message
+                        messages.value.push({ role: 'user', content: promptStr });
+                        targetIndex =
+                            messages.value.push({ role: 'assistant', content: '', usage: null, error: null }) -
+                            1;
+                    }
 
-            scrollToBottom();
+                    scrollToBottom();
 
-            const startTime = Date.now();
-            let firstTokenReceived = false;
+                    const startTime = Date.now();
+                    let firstTokenReceived = false;
 
-            try {
-              const headers = { 'Content-Type': 'application/json' };
-              if (config.apiKey) {
-                headers['Authorization'] = `Bearer ${config.apiKey}`;
-              }
+                    try {
+                        const headers = { 'Content-Type': 'application/json' };
+                        if (config.apiKey) {
+                            headers['Authorization'] = `Bearer ${config.apiKey}`;
+                        }
 
-              const response = await fetch(`${config.apiBase}/chat/completions`, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(buildPayload(promptStr)),
-                signal: abortController.signal,
-              });
+                        const response = await fetch(`${config.apiBase}/chat/completions`, {
+                            method: 'POST',
+                            headers,
+                            body: JSON.stringify(buildPayload(promptStr)),
+                            signal: abortController.signal,
+                        });
 
-              if (!response.ok) {
-                let errStr = `HTTP ${response.status}`;
-                try {
-                  const errJson = await response.json();
-                  errStr += `: ${errJson.error?.message || JSON.stringify(errJson)}`;
-                } catch (e) {
-                  errStr += `: ${response.statusText}`;
-                }
-                if (response.status === 413 || errStr.toLowerCase().includes('token')) {
-                  throw new Error(`Token超限或请求过大 (${errStr})`);
-                } else if (response.status === 503) {
-                  throw new Error(`模型过载，请稍后重试 (${errStr})`);
-                } else {
-                  throw new Error(`网络或服务错误: ${errStr}`);
-                }
-              }
+                        if (!response.ok) {
+                            let errStr = `HTTP ${response.status}`;
+                            try {
+                                const errJson = await response.json();
+                                errStr += `: ${errJson.error?.message || JSON.stringify(errJson)}`;
+                            } catch (e) {
+                                errStr += `: ${response.statusText}`;
+                            }
+                            if (response.status === 413 || errStr.toLowerCase().includes('token')) {
+                                throw new Error(`Token超限或请求过大 (${errStr})`);
+                            } else if (response.status === 503) {
+                                throw new Error(`模型过载，请稍后重试 (${errStr})`);
+                            } else {
+                                throw new Error(`网络或服务错误: ${errStr}`);
+                            }
+                        }
 
-              const asyncIterable = parseSSE(response.body);
-              for await (const chunk of asyncIterable) {
-                if (!firstTokenReceived) {
-                  firstTokenReceived = true;
-                  messages.value[targetIndex].ttft = Date.now() - startTime;
-                }
+                        const asyncIterable = parseSSE(response.body);
+                        for await (const chunk of asyncIterable) {
+                            if (!firstTokenReceived) {
+                                firstTokenReceived = true;
+                                messages.value[targetIndex].ttft = Date.now() - startTime;
+                            }
 
-                if (
-                  chunk.choices &&
-                  chunk.choices[0] &&
-                  chunk.choices[0].delta &&
-                  chunk.choices[0].delta.content
-                ) {
-                  messages.value[targetIndex].content += chunk.choices[0].delta.content;
-                  scrollToBottom();
-                }
+                            if (
+                                chunk.choices &&
+                                chunk.choices[0] &&
+                                chunk.choices[0].delta &&
+                                chunk.choices[0].delta.content
+                            ) {
+                                messages.value[targetIndex].content += chunk.choices[0].delta.content;
+                                scrollToBottom();
+                            }
 
-                if (chunk.usage) {
-                  messages.value[targetIndex].usage = chunk.usage;
-                }
-              }
-            } catch (err) {
-              if (err.name === 'AbortError') {
-                messages.value[targetIndex].content += '\n\n*[已停止生成]*';
-              } else {
-                console.error(err);
-                messages.value[targetIndex].error = err.message || '请求超时或网络异常';
-              }
-            } finally {
-              isGenerating.value = false;
-              abortController = null;
-              scrollToBottom();
-            }
-          };
+                            if (chunk.usage) {
+                                messages.value[targetIndex].usage = chunk.usage;
+                            }
+                        }
+                    } catch (err) {
+                        if (err.name === 'AbortError') {
+                            messages.value[targetIndex].content += '\n\n*[已停止生成]*';
+                        } else {
+                            console.error(err);
+                            messages.value[targetIndex].error = err.message || '请求超时或网络异常';
+                        }
+                    } finally {
+                        isGenerating.value = false;
+                        abortController = null;
+                        scrollToBottom();
+                    }
+                };
 
-          const sendMessage = () => {
-            const prompt = inputPrompt.value.trim();
-            if (!prompt) return;
-            inputPrompt.value = '';
-            performRequest(prompt);
-          };
+                const sendMessage = () => {
+                    const prompt = inputPrompt.value.trim();
+                    if (!prompt) return;
+                    inputPrompt.value = '';
+                    performRequest(prompt);
+                };
 
-          const retryMessage = (index) => {
-            // Find the last user message before this assistant message
-            let lastUserMsg = '';
-            for (let i = index - 1; i >= 0; i--) {
-              if (messages.value[i].role === 'user') {
-                lastUserMsg = messages.value[i].content;
-                break;
-              }
-            }
-            if (lastUserMsg) {
-              performRequest(lastUserMsg, index);
-            }
-          };
+                const retryMessage = (index) => {
+                    // Find the last user message before this assistant message
+                    let lastUserMsg = '';
+                    for (let i = index - 1; i >= 0; i--) {
+                        if (messages.value[i].role === 'user') {
+                            lastUserMsg = messages.value[i].content;
+                            break;
+                        }
+                    }
+                    if (lastUserMsg) {
+                        performRequest(lastUserMsg, index);
+                    }
+                };
 
-          return {
-            initialized,
-            initError,
-            config,
-            params,
-            multiTurn,
-            messages,
-            inputPrompt,
-            isGenerating,
-            chatContainer,
-            handleFileUpload,
-            useDefaultConfig,
-            sendMessage,
-            clearChat,
-            stopGeneration,
-            renderMarkdown,
-            retryMessage,
-          };
-        },
-      }).mount('#app');
+                return {
+                    initialized,
+                    initError,
+                    config,
+                    params,
+                    multiTurn,
+                    messages,
+                    inputPrompt,
+                    isGenerating,
+                    chatContainer,
+                    handleFileUpload,
+                    useDefaultConfig,
+                    sendMessage,
+                    clearChat,
+                    stopGeneration,
+                    renderMarkdown,
+                    retryMessage,
+                };
+            },
+        }).mount('#app');
     </script>
-  </body>
+</body>
+
 </html>
