@@ -1,7 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
-
-<head>
+  <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Qwen vLLM Web UI</title>
@@ -14,870 +13,1140 @@
     <!-- Load Utils -->
     <script src="./utils.js"></script>
     <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f3f4f6;
+      body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: #f3f4f6;
+      }
+
+      .message-content pre {
+        background: #1e1e1e;
+        color: #d4d4d4;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        overflow-x: auto;
+        margin-top: 0.5rem;
+      }
+
+      .message-content code {
+        font-family: Consolas, monospace;
+      }
+
+      .message-content p {
+        margin-bottom: 0.5rem;
+      }
+
+      .message-content p:last-child {
+        margin-bottom: 0;
+      }
+
+      /* Scrollbar styles */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 4px;
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: #c1c1c1;
+        border-radius: 4px;
+      }
+
+      ::-webkit-scrollbar-thumb:hover {
+        background: #a8a8a8;
+      }
+
+      .spinner {
+        border: 3px solid rgba(0, 0, 0, 0.1);
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        border-left-color: #3b82f6;
+        animation: spin 1s linear infinite;
+        display: inline-block;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
         }
 
-        .message-content pre {
-            background: #1e1e1e;
-            color: #d4d4d4;
-            padding: 1rem;
-            border-radius: 0.5rem;
-            overflow-x: auto;
-            margin-top: 0.5rem;
+        100% {
+          transform: rotate(360deg);
         }
+      }
 
-        .message-content code {
-            font-family: Consolas, monospace;
-        }
+      /* Thinking section transition */
+      .think-content {
+        transition:
+          max-height 0.3s ease-in-out,
+          opacity 0.3s ease-in-out;
+        overflow: hidden;
+      }
 
-        .message-content p {
-            margin-bottom: 0.5rem;
-        }
+      .think-content.collapsed {
+        max-height: 0;
+        opacity: 0;
+      }
 
-        .message-content p:last-child {
-            margin-bottom: 0;
-        }
+      .think-content.expanded {
+        max-height: 2000px;
+        /* arbitrary large value for transition */
+        opacity: 1;
+      }
 
-        /* Scrollbar styles */
-        ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-        }
+      /* Hide scrollbar for Chrome, Safari and Opera */
+      .custom-scrollbar::-webkit-scrollbar {
+        height: 4px;
+      }
 
-        ::-webkit-scrollbar-track {
-            background: #f1f1f1;
-            border-radius: 4px;
-        }
+      .custom-scrollbar::-webkit-scrollbar-track {
+        background: transparent;
+      }
 
-        ::-webkit-scrollbar-thumb {
-            background: #c1c1c1;
-            border-radius: 4px;
-        }
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+        background-color: rgba(255, 255, 255, 0.3);
+        border-radius: 10px;
+      }
 
-        ::-webkit-scrollbar-thumb:hover {
-            background: #a8a8a8;
-        }
-
-        .spinner {
-            border: 3px solid rgba(0, 0, 0, 0.1);
-            width: 16px;
-            height: 16px;
-            border-radius: 50%;
-            border-left-color: #3b82f6;
-            animation: spin 1s linear infinite;
-            display: inline-block;
-        }
-
-        @keyframes spin {
-            0% {
-                transform: rotate(0deg);
-            }
-
-            100% {
-                transform: rotate(360deg);
-            }
-        }
-
-        /* Thinking section transition */
-        .think-content {
-            transition:
-                max-height 0.3s ease-in-out,
-                opacity 0.3s ease-in-out;
-            overflow: hidden;
-        }
-
-        .think-content.collapsed {
-            max-height: 0;
-            opacity: 0;
-        }
-
-        .think-content.expanded {
-            max-height: 2000px;
-            /* arbitrary large value for transition */
-            opacity: 1;
-        }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background-color: rgba(255, 255, 255, 0.5);
+      }
     </style>
-</head>
+  </head>
 
-<body class="h-screen flex flex-col overflow-hidden text-gray-800">
+  <body class="h-screen flex flex-col overflow-hidden text-gray-800">
     <div id="app" class="h-full flex flex-col max-w-7xl mx-auto w-full shadow-xl bg-white relative">
-        <!-- Setup Modal (Shown if log not found automatically) -->
-        <div v-if="!initialized"
-            class="absolute inset-0 z-50 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4">
-            <div class="bg-white rounded-lg p-6 max-w-md w-full shadow-2xl">
-                <h2 class="text-2xl font-bold mb-4">初始化服务配置</h2>
-                <p class="text-sm text-gray-600 mb-4">
-                    无法自动读取
-                    <code class="bg-gray-100 px-1 rounded">service_start_log.txt</code>。请手动选择该文件，或确保已通过本地服务器访问并存放于同目录。
-                </p>
+      <!-- Setup Modal (Shown if log not found automatically) -->
+      <div
+        v-if="!initialized"
+        class="absolute inset-0 z-50 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4"
+      >
+        <div class="bg-white rounded-lg p-6 max-w-md w-full shadow-2xl">
+          <h2 class="text-2xl font-bold mb-4">初始化服务配置</h2>
+          <p class="text-sm text-gray-600 mb-4">
+            无法自动读取
+            <code class="bg-gray-100 px-1 rounded">service_start_log.txt</code
+            >。请手动选择该文件，或确保已通过本地服务器访问并存放于同目录。
+          </p>
 
-                <input type="file" @change="handleFileUpload" accept=".txt"
-                    class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer border rounded-lg p-2 mb-4" />
+          <input
+            type="file"
+            @change="handleFileUpload"
+            accept=".txt"
+            class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer border rounded-lg p-2 mb-4"
+          />
 
-                <div v-if="initError" class="text-red-500 text-sm mb-4">{{ initError }}</div>
+          <div v-if="initError" class="text-red-500 text-sm mb-4">{{ initError }}</div>
 
-                <button @click="useDefaultConfig" class="w-full text-gray-500 hover:text-gray-700 underline text-sm">
-                    跳过，使用默认配置 (localhost:8000/v1)
-                </button>
-            </div>
+          <button
+            @click="useDefaultConfig"
+            class="w-full text-gray-500 hover:text-gray-700 underline text-sm"
+          >
+            跳过，使用默认配置 (localhost:8000/v1)
+          </button>
+        </div>
+      </div>
+
+      <!-- Header -->
+      <header
+        class="flex-shrink-0 bg-blue-600 text-white p-4 flex justify-between items-center shadow-md z-10"
+      >
+        <div class="flex items-center gap-4">
+          <div>
+            <h1 class="text-xl font-bold flex items-center gap-2">
+              Qwen vLLM 推理客户端
+              <span class="text-xs bg-blue-800 px-2 py-1 rounded-full"
+                >{{ config.model || '未加载模型' }}</span
+              >
+            </h1>
+            <p class="text-xs text-blue-200 mt-1">
+              API: {{ config.apiBase }} | Max Context: {{ config.maxModelLen }}
+            </p>
+          </div>
+
+          <!-- Sessions Tabs -->
+          <div
+            class="hidden md:flex ml-6 bg-blue-700 p-1 rounded-lg gap-1 max-w-md overflow-x-auto custom-scrollbar"
+          >
+            <button
+              v-for="session in sessions"
+              :key="session.id"
+              @click="switchSession(session.id)"
+              class="px-3 py-1 text-sm rounded-md whitespace-nowrap transition-colors flex items-center gap-2"
+              :class="currentSessionId === session.id ? 'bg-white text-blue-700 shadow' : 'text-blue-100 hover:bg-blue-600'"
+            >
+              <span>{{ session.name }}</span>
+              <span
+                v-if="sessions.length > 1"
+                @click.stop="deleteSession(session.id)"
+                class="hover:text-red-500 rounded-full p-0.5"
+                :class="currentSessionId === session.id ? 'text-gray-400' : 'text-blue-300'"
+              >
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M6 18L18 6M6 6l12 12"
+                  ></path>
+                </svg>
+              </span>
+            </button>
+            <button
+              @click="createNewSession"
+              class="px-2 py-1 text-blue-100 hover:text-white hover:bg-blue-600 rounded-md transition-colors"
+              title="新建对话"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M12 4v16m8-8H4"
+                ></path>
+              </svg>
+            </button>
+          </div>
         </div>
 
-        <!-- Header -->
-        <header class="flex-shrink-0 bg-blue-600 text-white p-4 flex justify-between items-center shadow-md z-10">
+        <div class="flex gap-4 items-center">
+          <label class="flex items-center cursor-pointer gap-2">
+            <span class="text-sm font-medium">多轮对话</span>
+            <div class="relative">
+              <input type="checkbox" v-model="multiTurn" class="sr-only" />
+              <div
+                class="block bg-blue-400 w-10 h-6 rounded-full transition-colors"
+                :class="{'bg-blue-200': multiTurn}"
+              ></div>
+              <div
+                class="dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform"
+                :class="{'transform translate-x-4': multiTurn}"
+              ></div>
+            </div>
+          </label>
+          <button
+            @click="clearCurrentChat"
+            class="bg-red-500 hover:bg-red-600 px-3 py-1.5 rounded text-sm font-semibold transition-colors"
+          >
+            清空当前
+          </button>
+        </div>
+      </header>
+
+      <!-- Main Chat Area -->
+      <main class="flex-1 flex overflow-hidden bg-gray-50">
+        <!-- Sidebar for Settings -->
+        <aside
+          class="w-72 bg-white border-r border-gray-200 p-4 flex flex-col gap-4 overflow-y-auto hidden md:flex flex-shrink-0"
+        >
+          <h3 class="font-bold text-gray-700 border-b pb-2">采样参数</h3>
+
+          <!-- Preset Selection -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">预设模式</label>
+            <div class="grid grid-cols-2 gap-2">
+              <button
+                @click="applyPreset('balanced')"
+                class="px-2 py-1.5 text-xs rounded border transition-colors"
+                :class="activePreset === 'balanced' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'"
+              >
+                平衡 (默认)
+              </button>
+              <button
+                @click="applyPreset('creative')"
+                class="px-2 py-1.5 text-xs rounded border transition-colors"
+                :class="activePreset === 'creative' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'"
+              >
+                发散思维
+              </button>
+              <button
+                @click="applyPreset('precise')"
+                class="px-2 py-1.5 text-xs rounded border transition-colors"
+                :class="activePreset === 'precise' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'"
+              >
+                精确/代码
+              </button>
+              <button
+                @click="applyPreset('custom')"
+                class="px-2 py-1.5 text-xs rounded border transition-colors"
+                :class="activePreset === 'custom' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'"
+              >
+                自定义
+              </button>
+            </div>
+          </div>
+
+          <!-- Parameters (Disabled if not custom, but visually visible) -->
+          <div
+            class="space-y-4 mt-2 transition-opacity"
+            :class="activePreset === 'custom' ? 'opacity-100' : 'opacity-60'"
+          >
             <div>
-                <h1 class="text-xl font-bold flex items-center gap-2">
-                    Qwen vLLM 推理客户端
-                    <span class="text-xs bg-blue-800 px-2 py-1 rounded-full">{{ config.model || '未加载模型' }}</span>
-                </h1>
-                <p class="text-xs text-blue-200 mt-1">
-                    API: {{ config.apiBase }} | Max Context: {{ config.maxModelLen }}
-                </p>
+              <label class="block text-sm font-medium text-gray-700 mb-1 flex justify-between">
+                <span>Temperature</span>
+                <span class="text-gray-500">{{ params.temperature }}</span>
+              </label>
+              <input
+                type="range"
+                v-model.number="params.temperature"
+                @input="onParamChange"
+                min="0"
+                max="2"
+                step="0.1"
+                class="w-full cursor-pointer"
+                :disabled="activePreset !== 'custom'"
+              />
+              <p class="text-[10px] text-gray-400 mt-1">
+                控制输出的随机性。值越高越发散，越低越确定。
+              </p>
             </div>
-            <div class="flex gap-4 items-center">
-                <label class="flex items-center cursor-pointer gap-2">
-                    <span class="text-sm font-medium">多轮对话</span>
-                    <div class="relative">
-                        <input type="checkbox" v-model="multiTurn" class="sr-only" />
-                        <div class="block bg-blue-400 w-10 h-6 rounded-full transition-colors"
-                            :class="{'bg-blue-200': multiTurn}"></div>
-                        <div class="dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform"
-                            :class="{'transform translate-x-4': multiTurn}"></div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1 flex justify-between">
+                <span>Top P</span>
+                <span class="text-gray-500">{{ params.top_p }}</span>
+              </label>
+              <input
+                type="range"
+                v-model.number="params.top_p"
+                @input="onParamChange"
+                min="0"
+                max="1"
+                step="0.05"
+                class="w-full cursor-pointer"
+                :disabled="activePreset !== 'custom'"
+              />
+              <p class="text-[10px] text-gray-400 mt-1">
+                控制词汇采样的概率阈值。推荐与Temperature只调整其一。
+              </p>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Max Tokens</label>
+              <input
+                type="number"
+                v-model.number="params.max_tokens"
+                @input="onParamChange"
+                class="w-full border rounded px-2 py-1.5 text-sm"
+                :disabled="activePreset !== 'custom'"
+              />
+              <p class="text-[10px] text-gray-400 mt-1">单次回复生成的最大Token数量。</p>
+            </div>
+          </div>
+
+          <div v-if="config.apiKey" class="mt-4 pt-4 border-t">
+            <p class="text-xs text-green-600 flex items-center gap-1">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M5 13l4 4L19 7"
+                ></path>
+              </svg>
+              已加载 API Key
+            </p>
+          </div>
+        </aside>
+
+        <!-- Messages List -->
+        <div class="flex-1 flex flex-col p-4 overflow-y-auto" ref="chatContainer">
+          <div
+            v-if="messages.length === 0"
+            class="flex-1 flex items-center justify-center text-gray-400 text-lg"
+          >
+            开始输入以与 Qwen 模型对话...
+          </div>
+
+          <div
+            v-for="(msg, index) in messages"
+            :key="index"
+            class="mb-6 flex group"
+            :class="msg.role === 'user' ? 'justify-end' : 'justify-start'"
+          >
+            <!-- User message copy button (outside bubble, left side) -->
+            <div
+              v-if="msg.role === 'user'"
+              class="flex flex-col justify-start mr-2 opacity-0 group-hover:opacity-100 transition-opacity"
+            >
+              <button
+                @click="copyToClipboard(msg)"
+                class="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                title="复制"
+              >
+                <span v-if="msg.copied" class="text-xs text-green-600 font-medium whitespace-nowrap"
+                  >已复制</span
+                >
+                <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                  ></path>
+                </svg>
+              </button>
+            </div>
+
+            <!-- The Bubble Container -->
+            <div
+              class="max-w-[85%] relative flex flex-col"
+              :class="msg.role === 'user' ? 'items-end' : 'items-start w-full'"
+            >
+              <!-- The Bubble -->
+              <div
+                class="rounded-lg p-4 shadow-sm w-full"
+                :class="msg.role === 'user' ? 'bg-blue-100 text-blue-900' : 'bg-white border border-gray-200'"
+              >
+                <div class="font-bold text-xs mb-1 text-gray-500 uppercase tracking-wider">
+                  {{ msg.role === 'user' ? 'You' : 'Qwen' }}
+                </div>
+
+                <!-- Thinking Section -->
+                <div
+                  v-if="msg.role === 'assistant' && msg.thinking"
+                  class="mb-3 border border-gray-100 bg-gray-50 rounded-md"
+                >
+                  <button
+                    @click="msg.showThinking = !msg.showThinking"
+                    class="w-full px-3 py-2 flex items-center justify-between text-xs font-medium text-gray-500 hover:bg-gray-100 transition-colors rounded-md focus:outline-none"
+                  >
+                    <div class="flex items-center gap-2">
+                      <div v-if="msg.isThinking" class="spinner"></div>
+                      <span>{{ msg.isThinking ? '思考中...' : '查看思考过程' }}</span>
                     </div>
-                </label>
-                <button @click="clearChat"
-                    class="bg-red-500 hover:bg-red-600 px-3 py-1.5 rounded text-sm font-semibold transition-colors">
-                    清空对话
+                    <!-- Arrow: Right when collapsed, Down when expanded -->
+                    <svg
+                      class="w-4 h-4 transform transition-transform duration-300"
+                      :class="msg.showThinking ? 'rotate-90' : 'rotate-0'"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M9 5l7 7-7 7"
+                      ></path>
+                    </svg>
+                  </button>
+                  <div
+                    class="think-content px-3 text-xs text-gray-600 border-t border-gray-100"
+                    :class="msg.showThinking ? 'expanded py-2' : 'collapsed'"
+                  >
+                    <div v-html="renderMarkdown(msg.thinking)"></div>
+                  </div>
+                </div>
+
+                <div
+                  class="message-content text-sm leading-relaxed"
+                  v-html="renderMarkdown(msg.content)"
+                ></div>
+
+                <!-- Error State -->
+                <div
+                  v-if="msg.error"
+                  class="mt-2 text-red-500 text-sm font-semibold flex items-center gap-2"
+                >
+                  <span>{{ msg.error }}</span>
+                  <button @click="retryMessage(index)" class="underline hover:text-red-700">
+                    重试
+                  </button>
+                </div>
+
+                <!-- Usage Stats -->
+                <div
+                  v-if="msg.usage && !msg.error"
+                  class="mt-2 pt-2 border-t border-gray-100 text-xs text-gray-400 flex gap-3"
+                >
+                  <span title="Prompt Tokens">Prompt: {{ msg.usage.prompt_tokens }}</span>
+                  <span title="Completion Tokens"
+                    >Completion: {{ msg.usage.completion_tokens }}</span
+                  >
+                  <span title="Total Tokens" class="font-semibold text-gray-500"
+                    >Total: {{ msg.usage.total_tokens }}</span
+                  >
+                  <span v-if="msg.ttft" title="Time to First Token">TTFT: {{ msg.ttft }}ms</span>
+                </div>
+              </div>
+
+              <!-- Assistant message copy button (outside bubble, bottom left) -->
+              <div
+                v-if="msg.role === 'assistant' && !msg.error && msg.content"
+                class="mt-1 flex justify-start opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <button
+                  @click="copyToClipboard(msg)"
+                  class="flex items-center gap-1 p-1 rounded-md text-xs text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                  title="复制响应"
+                >
+                  <svg
+                    v-if="!msg.copied"
+                    class="w-3.5 h-3.5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                    ></path>
+                  </svg>
+                  <span v-if="msg.copied" class="text-green-600 font-medium">已复制</span>
+                  <span v-else>复制</span>
                 </button>
+              </div>
             </div>
-        </header>
+          </div>
 
-        <!-- Main Chat Area -->
-        <main class="flex-1 flex overflow-hidden bg-gray-50">
-            <!-- Sidebar for Settings -->
-            <aside
-                class="w-72 bg-white border-r border-gray-200 p-4 flex flex-col gap-4 overflow-y-auto hidden md:flex flex-shrink-0">
-                <h3 class="font-bold text-gray-700 border-b pb-2">采样参数</h3>
-
-                <!-- Preset Selection -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">预设模式</label>
-                    <div class="grid grid-cols-2 gap-2">
-                        <button @click="applyPreset('balanced')"
-                            class="px-2 py-1.5 text-xs rounded border transition-colors"
-                            :class="activePreset === 'balanced' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'">
-                            平衡 (默认)
-                        </button>
-                        <button @click="applyPreset('creative')"
-                            class="px-2 py-1.5 text-xs rounded border transition-colors"
-                            :class="activePreset === 'creative' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'">
-                            发散思维
-                        </button>
-                        <button @click="applyPreset('precise')"
-                            class="px-2 py-1.5 text-xs rounded border transition-colors"
-                            :class="activePreset === 'precise' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'">
-                            精确/代码
-                        </button>
-                        <button @click="applyPreset('custom')"
-                            class="px-2 py-1.5 text-xs rounded border transition-colors"
-                            :class="activePreset === 'custom' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'">
-                            自定义
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Parameters (Disabled if not custom, but visually visible) -->
-                <div class="space-y-4 mt-2 transition-opacity"
-                    :class="activePreset === 'custom' ? 'opacity-100' : 'opacity-60'">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1 flex justify-between">
-                            <span>Temperature</span>
-                            <span class="text-gray-500">{{ params.temperature }}</span>
-                        </label>
-                        <input type="range" v-model.number="params.temperature" @input="onParamChange" min="0" max="2"
-                            step="0.1" class="w-full cursor-pointer" :disabled="activePreset !== 'custom'" />
-                        <p class="text-[10px] text-gray-400 mt-1">
-                            控制输出的随机性。值越高越发散，越低越确定。
-                        </p>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1 flex justify-between">
-                            <span>Top P</span>
-                            <span class="text-gray-500">{{ params.top_p }}</span>
-                        </label>
-                        <input type="range" v-model.number="params.top_p" @input="onParamChange" min="0" max="1"
-                            step="0.05" class="w-full cursor-pointer" :disabled="activePreset !== 'custom'" />
-                        <p class="text-[10px] text-gray-400 mt-1">
-                            控制词汇采样的概率阈值。推荐与Temperature只调整其一。
-                        </p>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Max Tokens</label>
-                        <input type="number" v-model.number="params.max_tokens" @input="onParamChange"
-                            class="w-full border rounded px-2 py-1.5 text-sm" :disabled="activePreset !== 'custom'" />
-                        <p class="text-[10px] text-gray-400 mt-1">单次回复生成的最大Token数量。</p>
-                    </div>
-                </div>
-
-                <div v-if="config.apiKey" class="mt-4 pt-4 border-t">
-                    <p class="text-xs text-green-600 flex items-center gap-1">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7">
-                            </path>
-                        </svg>
-                        已加载 API Key
-                    </p>
-                </div>
-            </aside>
-
-            <!-- Messages List -->
-            <div class="flex-1 flex flex-col p-4 overflow-y-auto" ref="chatContainer">
-                <div v-if="messages.length === 0" class="flex-1 flex items-center justify-center text-gray-400 text-lg">
-                    开始输入以与 Qwen 模型对话...
-                </div>
-
-                <div v-for="(msg, index) in messages" :key="index" class="mb-6 flex group"
-                    :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
-                    <!-- User message copy button (outside bubble, left side) -->
-                    <div v-if="msg.role === 'user'"
-                        class="flex flex-col justify-start mr-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button @click="copyToClipboard(msg)"
-                            class="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100" title="复制">
-                            <span v-if="msg.copied"
-                                class="text-xs text-green-600 font-medium whitespace-nowrap">已复制</span>
-                            <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z">
-                                </path>
-                            </svg>
-                        </button>
-                    </div>
-
-                    <!-- The Bubble Container -->
-                    <div class="max-w-[85%] relative flex flex-col"
-                        :class="msg.role === 'user' ? 'items-end' : 'items-start w-full'">
-                        <!-- The Bubble -->
-                        <div class="rounded-lg p-4 shadow-sm w-full"
-                            :class="msg.role === 'user' ? 'bg-blue-100 text-blue-900' : 'bg-white border border-gray-200'">
-                            <div class="font-bold text-xs mb-1 text-gray-500 uppercase tracking-wider">
-                                {{ msg.role === 'user' ? 'You' : 'Qwen' }}
-                            </div>
-
-                            <!-- Thinking Section -->
-                            <div v-if="msg.role === 'assistant' && msg.thinking"
-                                class="mb-3 border border-gray-100 bg-gray-50 rounded-md">
-                                <button @click="msg.showThinking = !msg.showThinking"
-                                    class="w-full px-3 py-2 flex items-center justify-between text-xs font-medium text-gray-500 hover:bg-gray-100 transition-colors rounded-md focus:outline-none">
-                                    <div class="flex items-center gap-2">
-                                        <div v-if="msg.isThinking" class="spinner"></div>
-                                        <span>{{ msg.isThinking ? '思考中...' : '查看思考过程' }}</span>
-                                    </div>
-                                    <!-- Arrow: Right when collapsed, Down when expanded -->
-                                    <svg class="w-4 h-4 transform transition-transform duration-300"
-                                        :class="msg.showThinking ? 'rotate-90' : 'rotate-0'" fill="none"
-                                        stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M9 5l7 7-7 7"></path>
-                                    </svg>
-                                </button>
-                                <div class="think-content px-3 text-xs text-gray-600 border-t border-gray-100"
-                                    :class="msg.showThinking ? 'expanded py-2' : 'collapsed'">
-                                    <div v-html="renderMarkdown(msg.thinking)"></div>
-                                </div>
-                            </div>
-
-                            <div class="message-content text-sm leading-relaxed" v-html="renderMarkdown(msg.content)">
-                            </div>
-
-                            <!-- Error State -->
-                            <div v-if="msg.error"
-                                class="mt-2 text-red-500 text-sm font-semibold flex items-center gap-2">
-                                <span>{{ msg.error }}</span>
-                                <button @click="retryMessage(index)" class="underline hover:text-red-700">
-                                    重试
-                                </button>
-                            </div>
-
-                            <!-- Usage Stats -->
-                            <div v-if="msg.usage && !msg.error"
-                                class="mt-2 pt-2 border-t border-gray-100 text-xs text-gray-400 flex gap-3">
-                                <span title="Prompt Tokens">Prompt: {{ msg.usage.prompt_tokens }}</span>
-                                <span title="Completion Tokens">Completion: {{ msg.usage.completion_tokens }}</span>
-                                <span title="Total Tokens" class="font-semibold text-gray-500">Total: {{
-                                    msg.usage.total_tokens }}</span>
-                                <span v-if="msg.ttft" title="Time to First Token">TTFT: {{ msg.ttft }}ms</span>
-                            </div>
-                        </div>
-
-                        <!-- Assistant message copy button (outside bubble, bottom left) -->
-                        <div v-if="msg.role === 'assistant' && !msg.error && msg.content"
-                            class="mt-1 flex justify-start opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button @click="copyToClipboard(msg)"
-                                class="flex items-center gap-1 p-1 rounded-md text-xs text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-                                title="复制响应">
-                                <svg v-if="!msg.copied" class="w-3.5 h-3.5" fill="none" stroke="currentColor"
-                                    viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z">
-                                    </path>
-                                </svg>
-                                <span v-if="msg.copied" class="text-green-600 font-medium">已复制</span>
-                                <span v-else>复制</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Typing Indicator -->
-                <div v-if="isGenerating" class="flex justify-start mb-6">
-                    <div class="bg-white border border-gray-200 rounded-lg p-4 shadow-sm flex items-center gap-3">
-                        <div class="spinner"></div>
-                        <span class="text-sm text-gray-500">Qwen 正在思考...</span>
-                        <button @click="stopGeneration"
-                            class="ml-4 text-xs bg-red-100 text-red-600 px-2 py-1 rounded hover:bg-red-200 transition-colors">
-                            停止生成
-                        </button>
-                    </div>
-                </div>
+          <!-- Typing Indicator -->
+          <div v-if="isGenerating" class="flex justify-start mb-6">
+            <div
+              class="bg-white border border-gray-200 rounded-lg p-4 shadow-sm flex items-center gap-3"
+            >
+              <div class="spinner"></div>
+              <span class="text-sm text-gray-500">Qwen 正在思考...</span>
+              <button
+                @click="stopGeneration"
+                class="ml-4 text-xs bg-red-100 text-red-600 px-2 py-1 rounded hover:bg-red-200 transition-colors"
+              >
+                停止生成
+              </button>
             </div>
-        </main>
+          </div>
+        </div>
+      </main>
 
-        <!-- Input Area -->
-        <footer class="bg-white p-4 border-t border-gray-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-            <div class="max-w-4xl mx-auto">
-                <!-- Media Preview Area -->
-                <div v-if="pendingMedia.length > 0" class="flex flex-wrap gap-2 mb-2">
-                    <div v-for="(media, idx) in pendingMedia" :key="idx" class="relative group">
-                        <div v-if="media.type === 'image'"
-                            class="w-16 h-16 rounded-md overflow-hidden border border-gray-200">
-                            <img :src="media.url" class="w-full h-full object-cover" />
-                        </div>
-                        <div v-else-if="media.type === 'video'"
-                            class="w-16 h-16 rounded-md overflow-hidden border border-gray-200 bg-black flex items-center justify-center">
-                            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z">
-                                </path>
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
-                        </div>
-                        <button @click="removePendingMedia(idx)"
-                            class="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M6 18L18 6M6 6l12 12"></path>
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Upload Error Message -->
-                <div v-if="mediaError" class="text-red-500 text-xs mb-2">{{ mediaError }}</div>
-
-                <form @submit.prevent="sendMessage" class="flex gap-2">
-                    <!-- Media Upload Button -->
-                    <button type="button" @click="$refs.mediaInput.click()"
-                        class="p-3 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent hover:border-blue-100"
-                        title="上传图片或视频">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z">
-                            </path>
-                        </svg>
-                    </button>
-                    <input type="file" ref="mediaInput" @change="handleMediaUpload" accept="image/*,video/*"
-                        class="hidden" multiple />
-
-                    <input type="text" v-model="inputPrompt" placeholder="输入提示词..."
-                        class="flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                        :disabled="isGenerating" autocomplete="off" />
-                    <button type="submit"
-                        class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                        :disabled="(!inputPrompt.trim() && pendingMedia.length === 0) || isGenerating">
-                        发送
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
-                        </svg>
-                    </button>
-                </form>
+      <!-- Input Area -->
+      <footer
+        class="bg-white p-4 border-t border-gray-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]"
+      >
+        <div class="max-w-4xl mx-auto">
+          <!-- Media Preview Area -->
+          <div v-if="pendingMedia.length > 0" class="flex flex-wrap gap-2 mb-2">
+            <div v-for="(media, idx) in pendingMedia" :key="idx" class="relative group">
+              <div
+                v-if="media.type === 'image'"
+                class="w-16 h-16 rounded-md overflow-hidden border border-gray-200"
+              >
+                <img :src="media.url" class="w-full h-full object-cover" />
+              </div>
+              <div
+                v-else-if="media.type === 'video'"
+                class="w-16 h-16 rounded-md overflow-hidden border border-gray-200 bg-black flex items-center justify-center"
+              >
+                <svg
+                  class="w-6 h-6 text-white"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
+                  ></path>
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  ></path>
+                </svg>
+              </div>
+              <button
+                @click="removePendingMedia(idx)"
+                class="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M6 18L18 6M6 6l12 12"
+                  ></path>
+                </svg>
+              </button>
             </div>
-        </footer>
+          </div>
+
+          <!-- Upload Error Message -->
+          <div v-if="mediaError" class="text-red-500 text-xs mb-2">{{ mediaError }}</div>
+
+          <form @submit.prevent="sendMessage" class="flex gap-2">
+            <!-- Media Upload Button -->
+            <button
+              type="button"
+              @click="$refs.mediaInput.click()"
+              class="p-3 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent hover:border-blue-100"
+              title="上传图片或视频"
+            >
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                ></path>
+              </svg>
+            </button>
+            <input
+              type="file"
+              ref="mediaInput"
+              @change="handleMediaUpload"
+              accept="image/*,video/*"
+              class="hidden"
+              multiple
+            />
+
+            <input
+              type="text"
+              v-model="inputPrompt"
+              placeholder="输入提示词..."
+              class="flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+              :disabled="isGenerating"
+              autocomplete="off"
+            />
+            <button
+              type="submit"
+              class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              :disabled="(!inputPrompt.trim() && pendingMedia.length === 0) || isGenerating"
+            >
+              发送
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+                ></path>
+              </svg>
+            </button>
+          </form>
+        </div>
+      </footer>
     </div>
 
     <script>
-        const { createApp, ref, reactive, nextTick, onMounted } = Vue;
+      const { createApp, ref, reactive, nextTick, onMounted, computed } = Vue;
 
-        createApp({
-            setup() {
-                const initialized = ref(false);
-                const initError = ref('');
-                const config = reactive({
-                    apiBase: 'http://localhost:8000/v1',
-                    model: 'qwen',
-                    maxModelLen: 8192,
-                    apiKey: '',
+      createApp({
+        setup() {
+          const initialized = ref(false);
+          const initError = ref('');
+          const config = reactive({
+            apiBase: 'http://localhost:8000/v1',
+            model: 'qwen',
+            maxModelLen: 8192,
+            apiKey: '',
+          });
+
+          const params = reactive({
+            temperature: 0.7,
+            top_p: 0.9,
+            max_tokens: 8192, // 提高默认值
+          });
+
+          const activePreset = ref('balanced');
+
+          const applyPreset = (presetName) => {
+            activePreset.value = presetName;
+            if (presetName === 'balanced') {
+              params.temperature = 0.7;
+              params.top_p = 0.9;
+              params.max_tokens = Math.min(8192, config.maxModelLen);
+            } else if (presetName === 'creative') {
+              params.temperature = 1.2;
+              params.top_p = 0.95;
+              params.max_tokens = Math.min(16384, config.maxModelLen); // 发散思维可能需要更长输出
+            } else if (presetName === 'precise') {
+              params.temperature = 0.1;
+              params.top_p = 0.1;
+              params.max_tokens = Math.min(8192, config.maxModelLen);
+            }
+          };
+
+          const onParamChange = () => {
+            activePreset.value = 'custom';
+          };
+
+          const multiTurn = ref(true);
+          const inputPrompt = ref('');
+          const isGenerating = ref(false);
+          const chatContainer = ref(null);
+
+          // Session Management
+          const generateId = () => Math.random().toString(36).substr(2, 9);
+          const sessions = ref([{ id: generateId(), name: '对话 1', messages: [] }]);
+          const currentSessionId = ref(sessions.value[0].id);
+
+          const currentSession = computed(() => {
+            return sessions.value.find((s) => s.id === currentSessionId.value) || sessions.value[0];
+          });
+
+          const messages = computed(() => {
+            return currentSession.value.messages;
+          });
+
+          const createNewSession = () => {
+            const newId = generateId();
+            sessions.value.push({
+              id: newId,
+              name: `对话 ${sessions.value.length + 1}`,
+              messages: [],
+            });
+            currentSessionId.value = newId;
+          };
+
+          const switchSession = (id) => {
+            if (isGenerating.value) return; // Prevent switching while generating
+            currentSessionId.value = id;
+            scrollToBottom();
+          };
+
+          const deleteSession = (id) => {
+            if (isGenerating.value) return;
+            const index = sessions.value.findIndex((s) => s.id === id);
+            if (index > -1) {
+              sessions.value.splice(index, 1);
+              if (currentSessionId.value === id) {
+                currentSessionId.value = sessions.value[Math.max(0, index - 1)].id;
+              }
+            }
+          };
+
+          // Media upload state
+          const pendingMedia = ref([]);
+          const mediaError = ref('');
+
+          // Maximum limits based on standard API constraints (can be adjusted)
+          const MAX_IMAGES = 2;
+          const MAX_VIDEOS = 1;
+          const MAX_FILE_SIZE_MB = 10;
+
+          const handleMediaUpload = (event) => {
+            const files = Array.from(event.target.files);
+            if (!files.length) return;
+
+            mediaError.value = '';
+
+            let currentImages = pendingMedia.value.filter((m) => m.type === 'image').length;
+            let currentVideos = pendingMedia.value.filter((m) => m.type === 'video').length;
+
+            files.forEach((file) => {
+              // Check file size
+              if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+                mediaError.value = `文件 ${file.name} 超过 ${MAX_FILE_SIZE_MB}MB 限制`;
+                return;
+              }
+
+              const isImage = file.type.startsWith('image/');
+              const isVideo = file.type.startsWith('video/');
+
+              if (isImage) {
+                if (currentImages >= MAX_IMAGES) {
+                  mediaError.value = `最多只能上传 ${MAX_IMAGES} 张图片`;
+                  return;
+                }
+                currentImages++;
+              } else if (isVideo) {
+                if (currentVideos >= MAX_VIDEOS) {
+                  mediaError.value = `最多只能上传 ${MAX_VIDEOS} 个视频`;
+                  return;
+                }
+                currentVideos++;
+              } else {
+                mediaError.value = '不支持的文件格式';
+                return;
+              }
+
+              const reader = new FileReader();
+              reader.onload = (e) => {
+                pendingMedia.value.push({
+                  type: isImage ? 'image' : 'video',
+                  url: e.target.result,
+                  file: file,
                 });
+              };
+              reader.readAsDataURL(file);
+            });
 
-                const params = reactive({
-                    temperature: 0.7,
-                    top_p: 0.9,
-                    max_tokens: 8192, // 提高默认值
-                });
+            // Reset input so the same file can be selected again if removed
+            if (event.target) event.target.value = '';
+          };
 
-                const activePreset = ref('balanced');
+          const removePendingMedia = (index) => {
+            pendingMedia.value.splice(index, 1);
+            mediaError.value = '';
+          };
 
-                const applyPreset = (presetName) => {
-                    activePreset.value = presetName;
-                    if (presetName === 'balanced') {
-                        params.temperature = 0.7;
-                        params.top_p = 0.9;
-                        params.max_tokens = Math.min(8192, config.maxModelLen);
-                    } else if (presetName === 'creative') {
-                        params.temperature = 1.2;
-                        params.top_p = 0.95;
-                        params.max_tokens = Math.min(16384, config.maxModelLen); // 发散思维可能需要更长输出
-                    } else if (presetName === 'precise') {
-                        params.temperature = 0.1;
-                        params.top_p = 0.1;
-                        params.max_tokens = Math.min(8192, config.maxModelLen);
-                    }
-                };
+          let abortController = null;
 
-                const onParamChange = () => {
-                    activePreset.value = 'custom';
-                };
+          const scrollToBottom = async () => {
+            await nextTick();
+            if (chatContainer.value) {
+              chatContainer.value.scrollTop = chatContainer.value.scrollHeight;
+            }
+          };
 
-                const multiTurn = ref(true);
-                const messages = ref([]);
-                const inputPrompt = ref('');
-                const isGenerating = ref(false);
-                const chatContainer = ref(null);
+          const applyConfig = (logText) => {
+            const parsed = parseServiceLog(logText);
+            Object.assign(config, parsed);
+            // Also clamp max_tokens if needed
+            params.max_tokens = Math.min(params.max_tokens, config.maxModelLen);
+            initialized.value = true;
+          };
 
-                // Media upload state
-                const pendingMedia = ref([]);
-                const mediaError = ref('');
+          const fetchLogAutomatically = async () => {
+            try {
+              // 尝试读取日志文件
+              const res = await fetch('./service_start_log.txt');
+              if (res.ok) {
+                const text = await res.text();
+                applyConfig(text);
+                return; // 成功解析则返回
+              }
+            } catch (err) {
+              console.warn('Cannot fetch log automatically, fallback to direct API query.');
+            }
 
-                // Maximum limits based on standard API constraints (can be adjusted)
-                const MAX_IMAGES = 2;
-                const MAX_VIDEOS = 1;
-                const MAX_FILE_SIZE_MB = 10;
-
-                const handleMediaUpload = (event) => {
-                    const files = Array.from(event.target.files);
-                    if (!files.length) return;
-
-                    mediaError.value = '';
-
-                    let currentImages = pendingMedia.value.filter((m) => m.type === 'image').length;
-                    let currentVideos = pendingMedia.value.filter((m) => m.type === 'video').length;
-
-                    files.forEach((file) => {
-                        // Check file size
-                        if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-                            mediaError.value = `文件 ${file.name} 超过 ${MAX_FILE_SIZE_MB}MB 限制`;
-                            return;
-                        }
-
-                        const isImage = file.type.startsWith('image/');
-                        const isVideo = file.type.startsWith('video/');
-
-                        if (isImage) {
-                            if (currentImages >= MAX_IMAGES) {
-                                mediaError.value = `最多只能上传 ${MAX_IMAGES} 张图片`;
-                                return;
-                            }
-                            currentImages++;
-                        } else if (isVideo) {
-                            if (currentVideos >= MAX_VIDEOS) {
-                                mediaError.value = `最多只能上传 ${MAX_VIDEOS} 个视频`;
-                                return;
-                            }
-                            currentVideos++;
-                        } else {
-                            mediaError.value = '不支持的文件格式';
-                            return;
-                        }
-
-                        const reader = new FileReader();
-                        reader.onload = (e) => {
-                            pendingMedia.value.push({
-                                type: isImage ? 'image' : 'video',
-                                url: e.target.result,
-                                file: file,
-                            });
-                        };
-                        reader.readAsDataURL(file);
-                    });
-
-                    // Reset input so the same file can be selected again if removed
-                    if (event.target) event.target.value = '';
-                };
-
-                const removePendingMedia = (index) => {
-                    pendingMedia.value.splice(index, 1);
-                    mediaError.value = '';
-                };
-
-                let abortController = null;
-
-                const scrollToBottom = async () => {
-                    await nextTick();
-                    if (chatContainer.value) {
-                        chatContainer.value.scrollTop = chatContainer.value.scrollHeight;
-                    }
-                };
-
-                const applyConfig = (logText) => {
-                    const parsed = parseServiceLog(logText);
-                    Object.assign(config, parsed);
-                    // Also clamp max_tokens if needed
+            // 如果读取日志失败，直接尝试向 API 获取模型信息
+            try {
+              const apiRes = await fetch(`${config.apiBase}/models`);
+              if (apiRes.ok) {
+                const data = await apiRes.json();
+                if (data && data.data && data.data.length > 0) {
+                  const modelInfo = data.data[0];
+                  config.model = modelInfo.id || 'qwen';
+                  if (modelInfo.max_model_len) {
+                    config.maxModelLen = modelInfo.max_model_len;
                     params.max_tokens = Math.min(params.max_tokens, config.maxModelLen);
-                    initialized.value = true;
-                };
+                  }
+                  initialized.value = true;
+                  return;
+                }
+              }
+            } catch (apiErr) {
+              console.warn('Failed to fetch model info from API directly:', apiErr);
+            }
+          };
 
-                const fetchLogAutomatically = async () => {
-                    try {
-                        // 尝试读取日志文件
-                        const res = await fetch('./service_start_log.txt');
-                        if (res.ok) {
-                            const text = await res.text();
-                            applyConfig(text);
-                            return; // 成功解析则返回
-                        }
-                    } catch (err) {
-                        console.warn('Cannot fetch log automatically, fallback to direct API query.');
-                    }
+          const handleFileUpload = (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              applyConfig(e.target.result);
+            };
+            reader.onerror = () => {
+              initError.value = '读取文件失败，请重试';
+            };
+            reader.readAsText(file);
+          };
 
-                    // 如果读取日志失败，直接尝试向 API 获取模型信息
-                    try {
-                        const apiRes = await fetch(`${config.apiBase}/models`);
-                        if (apiRes.ok) {
-                            const data = await apiRes.json();
-                            if (data && data.data && data.data.length > 0) {
-                                const modelInfo = data.data[0];
-                                config.model = modelInfo.id || 'qwen';
-                                if (modelInfo.max_model_len) {
-                                    config.maxModelLen = modelInfo.max_model_len;
-                                    params.max_tokens = Math.min(params.max_tokens, config.maxModelLen);
-                                }
-                                initialized.value = true;
-                                return;
-                            }
-                        }
-                    } catch (apiErr) {
-                        console.warn('Failed to fetch model info from API directly:', apiErr);
-                    }
-                };
+          const useDefaultConfig = () => {
+            initialized.value = true;
+          };
 
-                const handleFileUpload = (event) => {
-                    const file = event.target.files[0];
-                    if (!file) return;
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        applyConfig(e.target.result);
-                    };
-                    reader.onerror = () => {
-                        initError.value = '读取文件失败，请重试';
-                    };
-                    reader.readAsText(file);
-                };
+          onMounted(() => {
+            fetchLogAutomatically();
+          });
 
-                const useDefaultConfig = () => {
-                    initialized.value = true;
-                };
+          const renderMarkdown = (text) => {
+            if (!text) return '';
+            return marked.parse(text);
+          };
 
-                onMounted(() => {
-                    fetchLogAutomatically();
+          const clearCurrentChat = () => {
+            currentSession.value.messages = [];
+          };
+
+          const stopGeneration = () => {
+            if (abortController) {
+              abortController.abort();
+              abortController = null;
+              isGenerating.value = false;
+            }
+          };
+
+          const buildPayload = (promptStr, mediaItems = []) => {
+            const validParams = validateParams({ ...params, max_model_len: config.maxModelLen });
+            let chatMessages = [];
+
+            if (multiTurn.value) {
+              // filter out errors and the currently generating empty assistant message
+              chatMessages = messages.value
+                .filter((m) => !m.error && m.content !== '')
+                .map((m) => {
+                  // Support multimodal history if needed, for now we just pass content.
+                  // To properly support multi-turn with images, we'd need to store the raw multimodal array.
+                  // For simplicity in this implementation, we convert past messages to text if they were objects.
+                  let content = m.content;
+                  if (Array.isArray(m.rawContent)) {
+                    content = m.rawContent;
+                  }
+                  return { role: m.role, content: content };
                 });
+            }
 
-                const renderMarkdown = (text) => {
-                    if (!text) return '';
-                    return marked.parse(text);
-                };
+            // Construct current message content
+            let currentContent;
+            if (mediaItems.length > 0) {
+              currentContent = [];
+              // Add text first
+              if (promptStr.trim()) {
+                currentContent.push({ type: 'text', text: promptStr });
+              }
+              // Add media
+              mediaItems.forEach((media) => {
+                if (media.type === 'image') {
+                  currentContent.push({
+                    type: 'image_url',
+                    image_url: { url: media.url },
+                  });
+                } else if (media.type === 'video') {
+                  // Note: vLLM / OpenAI standard might differ slightly for video,
+                  // assuming similar format to image for base64 encoded videos or providing a file path.
+                  // Using a generic custom type here, adjust according to your specific vLLM multimodal setup.
+                  currentContent.push({
+                    type: 'video_url', // or whatever your Qwen model expects
+                    video_url: { url: media.url },
+                  });
+                }
+              });
+            } else {
+              currentContent = promptStr;
+            }
 
-                const clearChat = () => {
-                    messages.value = [];
-                };
+            chatMessages.push({ role: 'user', content: currentContent });
 
-                const stopGeneration = () => {
-                    if (abortController) {
-                        abortController.abort();
-                        abortController = null;
-                        isGenerating.value = false;
+            return {
+              model: config.model,
+              messages: chatMessages,
+              stream: true,
+              ...validParams,
+            };
+          };
+
+          const performRequest = async (promptStr, mediaItems = [], msgIndexToRetry = null) => {
+            if (isGenerating.value) return;
+
+            isGenerating.value = true;
+            abortController = new AbortController();
+
+            let targetIndex;
+            if (msgIndexToRetry !== null) {
+              // We are retrying an assistant message
+              targetIndex = msgIndexToRetry;
+              messages.value[targetIndex] = {
+                role: 'assistant',
+                content: '',
+                thinking: '',
+                isThinking: true,
+                showThinking: false,
+                usage: null,
+                error: null,
+              };
+            } else {
+              // For UI display, we just show the text prompt. Media is shown via a different UI indicator if needed.
+              messages.value.push({
+                role: 'user',
+                content: promptStr,
+                rawContent:
+                  mediaItems.length > 0
+                    ? buildPayload(promptStr, mediaItems).messages.slice(-1)[0].content
+                    : null,
+              });
+              targetIndex =
+                messages.value.push({
+                  role: 'assistant',
+                  content: '',
+                  thinking: '',
+                  isThinking: true,
+                  showThinking: false,
+                  usage: null,
+                  error: null,
+                }) - 1;
+            }
+
+            scrollToBottom();
+
+            const startTime = Date.now();
+            let firstTokenReceived = false;
+
+            try {
+              const headers = { 'Content-Type': 'application/json' };
+              if (config.apiKey) {
+                headers['Authorization'] = `Bearer ${config.apiKey}`;
+              }
+
+              const payload = buildPayload(promptStr, mediaItems);
+
+              const response = await fetch(`${config.apiBase}/chat/completions`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(payload),
+                signal: abortController.signal,
+              });
+
+              if (!response.ok) {
+                let errStr = `HTTP ${response.status}`;
+                try {
+                  const errJson = await response.json();
+                  errStr += `: ${errJson.error?.message || JSON.stringify(errJson)}`;
+                } catch (e) {
+                  errStr += `: ${response.statusText}`;
+                }
+                if (response.status === 413 || errStr.toLowerCase().includes('token')) {
+                  throw new Error(`Token超限或请求过大 (${errStr})`);
+                } else if (response.status === 503) {
+                  throw new Error(`模型过载，请稍后重试 (${errStr})`);
+                } else {
+                  throw new Error(`网络或服务错误: ${errStr}`);
+                }
+              }
+
+              const asyncIterable = parseSSE(response.body);
+              for await (const chunk of asyncIterable) {
+                if (!firstTokenReceived) {
+                  firstTokenReceived = true;
+                  messages.value[targetIndex].ttft = Date.now() - startTime;
+                }
+
+                if (chunk.choices && chunk.choices[0] && chunk.choices[0].delta) {
+                  const delta = chunk.choices[0].delta;
+
+                  // DeepSeek / Qwen thinking model reasoning_content support
+                  if (delta.reasoning_content) {
+                    messages.value[targetIndex].thinking += delta.reasoning_content;
+                    // Keep thinking area open if user opened it, or auto scroll
+                    if (messages.value[targetIndex].showThinking) {
+                      scrollToBottom();
                     }
-                };
+                  }
 
-                const buildPayload = (promptStr, mediaItems = []) => {
-                    const validParams = validateParams({ ...params, max_model_len: config.maxModelLen });
-                    let chatMessages = [];
-
-                    if (multiTurn.value) {
-                        // filter out errors and the currently generating empty assistant message
-                        chatMessages = messages.value
-                            .filter((m) => !m.error && m.content !== '')
-                            .map((m) => {
-                                // Support multimodal history if needed, for now we just pass content.
-                                // To properly support multi-turn with images, we'd need to store the raw multimodal array.
-                                // For simplicity in this implementation, we convert past messages to text if they were objects.
-                                let content = m.content;
-                                if (Array.isArray(m.rawContent)) {
-                                    content = m.rawContent;
-                                }
-                                return { role: m.role, content: content };
-                            });
+                  if (delta.content) {
+                    // Once content starts, thinking is finished
+                    if (messages.value[targetIndex].isThinking) {
+                      messages.value[targetIndex].isThinking = false;
                     }
-
-                    // Construct current message content
-                    let currentContent;
-                    if (mediaItems.length > 0) {
-                        currentContent = [];
-                        // Add text first
-                        if (promptStr.trim()) {
-                            currentContent.push({ type: 'text', text: promptStr });
-                        }
-                        // Add media
-                        mediaItems.forEach((media) => {
-                            if (media.type === 'image') {
-                                currentContent.push({
-                                    type: 'image_url',
-                                    image_url: { url: media.url },
-                                });
-                            } else if (media.type === 'video') {
-                                // Note: vLLM / OpenAI standard might differ slightly for video,
-                                // assuming similar format to image for base64 encoded videos or providing a file path.
-                                // Using a generic custom type here, adjust according to your specific vLLM multimodal setup.
-                                currentContent.push({
-                                    type: 'video_url', // or whatever your Qwen model expects
-                                    video_url: { url: media.url },
-                                });
-                            }
-                        });
-                    } else {
-                        currentContent = promptStr;
-                    }
-
-                    chatMessages.push({ role: 'user', content: currentContent });
-
-                    return {
-                        model: config.model,
-                        messages: chatMessages,
-                        stream: true,
-                        ...validParams,
-                    };
-                };
-
-                const performRequest = async (promptStr, mediaItems = [], msgIndexToRetry = null) => {
-                    if (isGenerating.value) return;
-
-                    isGenerating.value = true;
-                    abortController = new AbortController();
-
-                    let targetIndex;
-                    if (msgIndexToRetry !== null) {
-                        // We are retrying an assistant message
-                        targetIndex = msgIndexToRetry;
-                        messages.value[targetIndex] = {
-                            role: 'assistant',
-                            content: '',
-                            thinking: '',
-                            isThinking: true,
-                            showThinking: false,
-                            usage: null,
-                            error: null,
-                        };
-                    } else {
-                        // For UI display, we just show the text prompt. Media is shown via a different UI indicator if needed.
-                        messages.value.push({
-                            role: 'user',
-                            content: promptStr,
-                            rawContent:
-                                mediaItems.length > 0
-                                    ? buildPayload(promptStr, mediaItems).messages.slice(-1)[0].content
-                                    : null,
-                        });
-                        targetIndex =
-                            messages.value.push({
-                                role: 'assistant',
-                                content: '',
-                                thinking: '',
-                                isThinking: true,
-                                showThinking: false,
-                                usage: null,
-                                error: null,
-                            }) - 1;
-                    }
-
+                    messages.value[targetIndex].content += delta.content;
                     scrollToBottom();
+                  }
+                }
 
-                    const startTime = Date.now();
-                    let firstTokenReceived = false;
+                if (chunk.usage) {
+                  messages.value[targetIndex].usage = chunk.usage;
+                  // In case there was no content, only reasoning, stop thinking state
+                  messages.value[targetIndex].isThinking = false;
+                }
+              }
+            } catch (err) {
+              if (err.name === 'AbortError') {
+                messages.value[targetIndex].content += '\n\n*[已停止生成]*';
+              } else {
+                console.error(err);
+                messages.value[targetIndex].error = err.message || '请求超时或网络异常';
+              }
+            } finally {
+              isGenerating.value = false;
+              abortController = null;
+              scrollToBottom();
+            }
+          };
 
-                    try {
-                        const headers = { 'Content-Type': 'application/json' };
-                        if (config.apiKey) {
-                            headers['Authorization'] = `Bearer ${config.apiKey}`;
-                        }
+          const sendMessage = () => {
+            const prompt = inputPrompt.value.trim();
+            const mediaItems = [...pendingMedia.value]; // Copy current pending media
 
-                        const payload = buildPayload(promptStr, mediaItems);
+            if (!prompt && mediaItems.length === 0) return;
 
-                        const response = await fetch(`${config.apiBase}/chat/completions`, {
-                            method: 'POST',
-                            headers,
-                            body: JSON.stringify(payload),
-                            signal: abortController.signal,
-                        });
+            inputPrompt.value = '';
+            pendingMedia.value = []; // Clear pending media after sending
 
-                        if (!response.ok) {
-                            let errStr = `HTTP ${response.status}`;
-                            try {
-                                const errJson = await response.json();
-                                errStr += `: ${errJson.error?.message || JSON.stringify(errJson)}`;
-                            } catch (e) {
-                                errStr += `: ${response.statusText}`;
-                            }
-                            if (response.status === 413 || errStr.toLowerCase().includes('token')) {
-                                throw new Error(`Token超限或请求过大 (${errStr})`);
-                            } else if (response.status === 503) {
-                                throw new Error(`模型过载，请稍后重试 (${errStr})`);
-                            } else {
-                                throw new Error(`网络或服务错误: ${errStr}`);
-                            }
-                        }
+            performRequest(prompt, mediaItems);
+          };
 
-                        const asyncIterable = parseSSE(response.body);
-                        for await (const chunk of asyncIterable) {
-                            if (!firstTokenReceived) {
-                                firstTokenReceived = true;
-                                messages.value[targetIndex].ttft = Date.now() - startTime;
-                            }
+          const retryMessage = (index) => {
+            // Find the last user message before this assistant message
+            let lastUserMsg = '';
+            let lastUserMedia = [];
+            for (let i = index - 1; i >= 0; i--) {
+              if (messages.value[i].role === 'user') {
+                lastUserMsg = messages.value[i].content;
+                // If the original message had multimodal array, try to extract media
+                if (Array.isArray(messages.value[i].rawContent)) {
+                  // Simplify: For retry, we just re-send the text for now,
+                  // properly re-sending base64 media can be memory intensive if stored in history
+                }
+                break;
+              }
+            }
+            if (lastUserMsg) {
+              performRequest(lastUserMsg, lastUserMedia, index);
+            }
+          };
 
-                            if (chunk.choices && chunk.choices[0] && chunk.choices[0].delta) {
-                                const delta = chunk.choices[0].delta;
+          const copyToClipboard = async (msg) => {
+            let textToCopy = msg.content;
+            if (msg.role === 'assistant' && msg.thinking) {
+              // Optionally include thinking process in copied text, or just the final response.
+              // Usually users just want the final response.
+              // If you want both: textToCopy = `[思考过程]\n${msg.thinking}\n\n[响应内容]\n${msg.content}`;
+            }
 
-                                // DeepSeek / Qwen thinking model reasoning_content support
-                                if (delta.reasoning_content) {
-                                    messages.value[targetIndex].thinking += delta.reasoning_content;
-                                    // Keep thinking area open if user opened it, or auto scroll
-                                    if (messages.value[targetIndex].showThinking) {
-                                        scrollToBottom();
-                                    }
-                                }
+            try {
+              await navigator.clipboard.writeText(textToCopy);
+              msg.copied = true;
+              setTimeout(() => {
+                msg.copied = false;
+              }, 2000);
+            } catch (err) {
+              console.error('Failed to copy text: ', err);
+            }
+          };
 
-                                if (delta.content) {
-                                    // Once content starts, thinking is finished
-                                    if (messages.value[targetIndex].isThinking) {
-                                        messages.value[targetIndex].isThinking = false;
-                                    }
-                                    messages.value[targetIndex].content += delta.content;
-                                    scrollToBottom();
-                                }
-                            }
-
-                            if (chunk.usage) {
-                                messages.value[targetIndex].usage = chunk.usage;
-                                // In case there was no content, only reasoning, stop thinking state
-                                messages.value[targetIndex].isThinking = false;
-                            }
-                        }
-                    } catch (err) {
-                        if (err.name === 'AbortError') {
-                            messages.value[targetIndex].content += '\n\n*[已停止生成]*';
-                        } else {
-                            console.error(err);
-                            messages.value[targetIndex].error = err.message || '请求超时或网络异常';
-                        }
-                    } finally {
-                        isGenerating.value = false;
-                        abortController = null;
-                        scrollToBottom();
-                    }
-                };
-
-                const sendMessage = () => {
-                    const prompt = inputPrompt.value.trim();
-                    const mediaItems = [...pendingMedia.value]; // Copy current pending media
-
-                    if (!prompt && mediaItems.length === 0) return;
-
-                    inputPrompt.value = '';
-                    pendingMedia.value = []; // Clear pending media after sending
-
-                    performRequest(prompt, mediaItems);
-                };
-
-                const retryMessage = (index) => {
-                    // Find the last user message before this assistant message
-                    let lastUserMsg = '';
-                    let lastUserMedia = [];
-                    for (let i = index - 1; i >= 0; i--) {
-                        if (messages.value[i].role === 'user') {
-                            lastUserMsg = messages.value[i].content;
-                            // If the original message had multimodal array, try to extract media
-                            if (Array.isArray(messages.value[i].rawContent)) {
-                                // Simplify: For retry, we just re-send the text for now,
-                                // properly re-sending base64 media can be memory intensive if stored in history
-                            }
-                            break;
-                        }
-                    }
-                    if (lastUserMsg) {
-                        performRequest(lastUserMsg, lastUserMedia, index);
-                    }
-                };
-
-                const copyToClipboard = async (msg) => {
-                    let textToCopy = msg.content;
-                    if (msg.role === 'assistant' && msg.thinking) {
-                        // Optionally include thinking process in copied text, or just the final response.
-                        // Usually users just want the final response.
-                        // If you want both: textToCopy = `[思考过程]\n${msg.thinking}\n\n[响应内容]\n${msg.content}`;
-                    }
-
-                    try {
-                        await navigator.clipboard.writeText(textToCopy);
-                        msg.copied = true;
-                        setTimeout(() => {
-                            msg.copied = false;
-                        }, 2000);
-                    } catch (err) {
-                        console.error('Failed to copy text: ', err);
-                    }
-                };
-
-                return {
-                    initialized,
-                    initError,
-                    config,
-                    params,
-                    activePreset,
-                    applyPreset,
-                    onParamChange,
-                    multiTurn,
-                    messages,
-                    inputPrompt,
-                    isGenerating,
-                    chatContainer,
-                    pendingMedia,
-                    mediaError,
-                    handleMediaUpload,
-                    removePendingMedia,
-                    handleFileUpload,
-                    useDefaultConfig,
-                    sendMessage,
-                    clearChat,
-                    stopGeneration,
-                    renderMarkdown,
-                    retryMessage,
-                    copyToClipboard,
-                };
-            },
-        }).mount('#app');
+          return {
+            initialized,
+            initError,
+            config,
+            params,
+            activePreset,
+            applyPreset,
+            onParamChange,
+            multiTurn,
+            sessions,
+            currentSessionId,
+            messages,
+            createNewSession,
+            switchSession,
+            deleteSession,
+            inputPrompt,
+            isGenerating,
+            chatContainer,
+            pendingMedia,
+            mediaError,
+            handleMediaUpload,
+            removePendingMedia,
+            handleFileUpload,
+            useDefaultConfig,
+            sendMessage,
+            clearCurrentChat,
+            stopGeneration,
+            renderMarkdown,
+            retryMessage,
+            copyToClipboard,
+          };
+        },
+      }).mount('#app');
     </script>
-</body>
-
+  </body>
 </html>
