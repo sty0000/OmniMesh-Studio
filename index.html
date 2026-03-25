@@ -426,7 +426,7 @@
                 const params = reactive({
                     temperature: 0.7,
                     top_p: 0.9,
-                    max_tokens: 1024,
+                    max_tokens: 8192, // 提高默认值
                 });
 
                 const activePreset = ref('balanced');
@@ -436,12 +436,15 @@
                     if (presetName === 'balanced') {
                         params.temperature = 0.7;
                         params.top_p = 0.9;
+                        params.max_tokens = Math.min(8192, config.maxModelLen);
                     } else if (presetName === 'creative') {
                         params.temperature = 1.2;
                         params.top_p = 0.95;
+                        params.max_tokens = Math.min(16384, config.maxModelLen); // 发散思维可能需要更长输出
                     } else if (presetName === 'precise') {
                         params.temperature = 0.1;
                         params.top_p = 0.1;
+                        params.max_tokens = Math.min(8192, config.maxModelLen);
                     }
                 };
 

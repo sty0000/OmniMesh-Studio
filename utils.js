@@ -52,12 +52,12 @@ function parseServiceLog(logText) {
  * @returns {Object} Validated and clamped parameters.
  */
 function validateParams(params) {
-  const { temperature = 0.7, top_p = 0.9, max_tokens = 1024, max_model_len = 8192 } = params;
+  const { temperature = 0.7, top_p = 0.9, max_tokens = 8192, max_model_len = 65536 } = params;
 
   return {
     temperature: Math.max(0, Math.min(2, Number(temperature) || 0.7)),
     top_p: Math.max(0, Math.min(1, Number(top_p) || 0.9)),
-    max_tokens: Math.max(1, Math.min(max_model_len, Number(max_tokens) || 1024)),
+    max_tokens: Math.max(1, Math.min(max_model_len, Number(max_tokens) || 8192)),
   };
 }
 

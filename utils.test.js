@@ -47,7 +47,7 @@ describe('validateParams', () => {
     const result = validateParams({});
     expect(result.temperature).toBe(0.7);
     expect(result.top_p).toBe(0.9);
-    expect(result.max_tokens).toBe(1024);
+    expect(result.max_tokens).toBe(8192);
   });
 });
 
