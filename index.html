@@ -176,38 +176,101 @@
       <main class="flex-1 flex overflow-hidden bg-gray-50">
         <!-- Sidebar for Settings -->
         <aside
-          class="w-64 bg-white border-r border-gray-200 p-4 flex flex-col gap-4 overflow-y-auto hidden md:flex"
+          class="w-72 bg-white border-r border-gray-200 p-4 flex flex-col gap-4 overflow-y-auto hidden md:flex flex-shrink-0"
         >
           <h3 class="font-bold text-gray-700 border-b pb-2">采样参数</h3>
 
+          <!-- Preset Selection -->
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1"
-              >Temperature ({{ params.temperature }})</label
-            >
-            <input
-              type="range"
-              v-model="params.temperature"
-              min="0"
-              max="2"
-              step="0.1"
-              class="w-full"
-            />
+            <label class="block text-sm font-medium text-gray-700 mb-2">预设模式</label>
+            <div class="grid grid-cols-2 gap-2">
+              <button
+                @click="applyPreset('balanced')"
+                class="px-2 py-1.5 text-xs rounded border transition-colors"
+                :class="activePreset === 'balanced' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'"
+              >
+                平衡 (默认)
+              </button>
+              <button
+                @click="applyPreset('creative')"
+                class="px-2 py-1.5 text-xs rounded border transition-colors"
+                :class="activePreset === 'creative' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'"
+              >
+                发散思维
+              </button>
+              <button
+                @click="applyPreset('precise')"
+                class="px-2 py-1.5 text-xs rounded border transition-colors"
+                :class="activePreset === 'precise' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'"
+              >
+                精确/代码
+              </button>
+              <button
+                @click="applyPreset('custom')"
+                class="px-2 py-1.5 text-xs rounded border transition-colors"
+                :class="activePreset === 'custom' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'"
+              >
+                自定义
+              </button>
+            </div>
           </div>
 
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1"
-              >Top P ({{ params.top_p }})</label
-            >
-            <input type="range" v-model="params.top_p" min="0" max="1" step="0.05" class="w-full" />
-          </div>
+          <!-- Parameters (Disabled if not custom, but visually visible) -->
+          <div
+            class="space-y-4 mt-2 transition-opacity"
+            :class="activePreset === 'custom' ? 'opacity-100' : 'opacity-60'"
+          >
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1 flex justify-between">
+                <span>Temperature</span>
+                <span class="text-gray-500">{{ params.temperature }}</span>
+              </label>
+              <input
+                type="range"
+                v-model.number="params.temperature"
+                @input="onParamChange"
+                min="0"
+                max="2"
+                step="0.1"
+                class="w-full cursor-pointer"
+                :disabled="activePreset !== 'custom'"
+              />
+              <p class="text-[10px] text-gray-400 mt-1">
+                控制输出的随机性。值越高越发散，越低越确定。
+              </p>
+            </div>
 
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Max Tokens</label>
-            <input
-              type="number"
-              v-model="params.max_tokens"
-              class="w-full border rounded px-2 py-1 text-sm"
-            />
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1 flex justify-between">
+                <span>Top P</span>
+                <span class="text-gray-500">{{ params.top_p }}</span>
+              </label>
+              <input
+                type="range"
+                v-model.number="params.top_p"
+                @input="onParamChange"
+                min="0"
+                max="1"
+                step="0.05"
+                class="w-full cursor-pointer"
+                :disabled="activePreset !== 'custom'"
+              />
+              <p class="text-[10px] text-gray-400 mt-1">
+                控制词汇采样的概率阈值。推荐与Temperature只调整其一。
+              </p>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Max Tokens</label>
+              <input
+                type="number"
+                v-model.number="params.max_tokens"
+                @input="onParamChange"
+                class="w-full border rounded px-2 py-1.5 text-sm"
+                :disabled="activePreset !== 'custom'"
+              />
+              <p class="text-[10px] text-gray-400 mt-1">单次回复生成的最大Token数量。</p>
+            </div>
           </div>
 
           <div v-if="config.apiKey" class="mt-4 pt-4 border-t">
@@ -447,6 +510,26 @@
             top_p: 0.9,
             max_tokens: 1024,
           });
+
+          const activePreset = ref('balanced');
+
+          const applyPreset = (presetName) => {
+            activePreset.value = presetName;
+            if (presetName === 'balanced') {
+              params.temperature = 0.7;
+              params.top_p = 0.9;
+            } else if (presetName === 'creative') {
+              params.temperature = 1.2;
+              params.top_p = 0.95;
+            } else if (presetName === 'precise') {
+              params.temperature = 0.1;
+              params.top_p = 0.1;
+            }
+          };
+
+          const onParamChange = () => {
+            activePreset.value = 'custom';
+          };
 
           const multiTurn = ref(true);
           const messages = ref([]);
@@ -727,6 +810,9 @@
             initError,
             config,
             params,
+            activePreset,
+            applyPreset,
+            onParamChange,
             multiTurn,
             messages,
             inputPrompt,
