@@ -8,6 +8,11 @@
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load KaTeX for Math rendering -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css" />
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+
     <!-- Marked for Markdown parsing -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <!-- Load Utils -->
@@ -862,7 +867,48 @@
 
           const renderMarkdown = (text) => {
             if (!text) return '';
-            return marked.parse(text);
+
+            // First, preprocess the text to handle <think> tags if they leak into content
+            let processedText = text;
+            const thinkMatch = processedText.match(/<think>([\s\S]*?)(?:<\/think>|$)/);
+            if (thinkMatch) {
+              // If we found a think tag in the regular content, we should strip it
+              // because it's already handled by our separate thinking logic,
+              // or if it wasn't, we just remove the tags so it displays cleanly.
+              // For Qwen, if it outputs <think> directly into content, we remove the tags
+              // and let the user see it, or strip it entirely if we moved it to msg.thinking.
+              // Here, we just remove the literal <think> and </think> tags to avoid HTML rendering issues
+              // if it leaked into the main content.
+              processedText = processedText.replace(/<think>/g, '').replace(/<\/think>/g, '');
+            }
+
+            // Convert markdown to HTML
+            let html = marked.parse(processedText);
+
+            // Setup KaTeX auto-render config
+            const katexOptions = {
+              delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '\\[', right: '\\]', display: true },
+                { left: '$', right: '$', display: false },
+                { left: '\\(', right: '\\)', display: false },
+              ],
+              throwOnError: false,
+            };
+
+            // Create a temporary DOM element to render math
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = html;
+
+            try {
+              if (window.renderMathInElement) {
+                window.renderMathInElement(tempDiv, katexOptions);
+              }
+            } catch (e) {
+              console.warn('KaTeX rendering error:', e);
+            }
+
+            return tempDiv.innerHTML;
           };
 
           const clearCurrentChat = () => {
@@ -1024,7 +1070,7 @@
                 if (chunk.choices && chunk.choices[0] && chunk.choices[0].delta) {
                   const delta = chunk.choices[0].delta;
 
-                  // DeepSeek / Qwen thinking model reasoning_content support
+                  // Handle DeepSeek/Qwen thinking model reasoning_content support
                   if (delta.reasoning_content) {
                     messages.value[targetIndex].thinking += delta.reasoning_content;
                     // Keep thinking area open if user opened it, or auto scroll
@@ -1034,11 +1080,44 @@
                   }
 
                   if (delta.content) {
-                    // Once content starts, thinking is finished
-                    if (messages.value[targetIndex].isThinking) {
-                      messages.value[targetIndex].isThinking = false;
+                    // Some Qwen models output <think> tags directly into the content stream
+                    // instead of using reasoning_content. We need to intercept this.
+                    let incomingContent = delta.content;
+
+                    // If we are currently in thinking mode but receiving content, check if it's the start of <think>
+                    if (
+                      messages.value[targetIndex].isThinking &&
+                      !messages.value[targetIndex].thinking &&
+                      incomingContent.includes('<think>')
+                    ) {
+                      incomingContent = incomingContent.replace('<think>', '');
+                      // We will route this to thinking instead of content
                     }
-                    messages.value[targetIndex].content += delta.content;
+
+                    // If we don't have reasoning_content from the API, we manually parse <think> tags from content
+                    // This is a simplified fallback: if we haven't seen a </think> yet, we append to thinking
+                    if (
+                      messages.value[targetIndex].isThinking &&
+                      messages.value[targetIndex].content === ''
+                    ) {
+                      if (incomingContent.includes('</think>')) {
+                        const parts = incomingContent.split('</think>');
+                        messages.value[targetIndex].thinking += parts[0];
+                        messages.value[targetIndex].isThinking = false;
+
+                        if (parts[1]) {
+                          messages.value[targetIndex].content += parts[1];
+                        }
+                      } else {
+                        messages.value[targetIndex].thinking += incomingContent;
+                      }
+                    } else {
+                      // Once content starts, thinking is finished
+                      if (messages.value[targetIndex].isThinking) {
+                        messages.value[targetIndex].isThinking = false;
+                      }
+                      messages.value[targetIndex].content += incomingContent;
+                    }
                     scrollToBottom();
                   }
                 }
