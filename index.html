@@ -660,6 +660,43 @@
                     {{ msg.role === 'user' ? 'You' : 'Qwen' }}
                   </div>
 
+                  <!-- Thinking Section -->
+                  <div
+                    v-if="msg.role === 'assistant' && msg.thinking"
+                    class="mb-4 border border-gray-100 bg-gray-50 rounded-lg"
+                  >
+                    <button
+                      @click="msg.showThinking = !msg.showThinking"
+                      class="w-full px-4 py-2.5 flex items-center justify-between text-sm font-medium text-gray-500 hover:bg-gray-100 transition-colors rounded-lg focus:outline-none"
+                    >
+                      <div class="flex items-center gap-2">
+                        <div v-if="msg.isThinking" class="spinner"></div>
+                        <span>{{ msg.isThinking ? '思考中...' : '查看思考过程' }}</span>
+                      </div>
+                      <!-- Arrow: Right when collapsed, Down when expanded -->
+                      <svg
+                        class="w-4 h-4 transform transition-transform duration-300"
+                        :class="msg.showThinking ? 'rotate-90' : 'rotate-0'"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M9 5l7 7-7 7"
+                        ></path>
+                      </svg>
+                    </button>
+                    <div
+                      class="think-content px-4 text-sm text-gray-600 border-t border-gray-100"
+                      :class="msg.showThinking ? 'expanded py-3' : 'collapsed'"
+                    >
+                      <div v-html="renderMarkdown(msg.thinking)"></div>
+                    </div>
+                  </div>
+
                   <div
                     class="message-content text-base md:text-[1.05rem] leading-relaxed break-words"
                     v-html="renderMarkdown(msg.content)"
@@ -723,13 +760,19 @@
               </div>
             </div>
 
-            <!-- Typing Indicator (Now very simple since stop button is moved) -->
+            <!-- Typing Indicator -->
             <div v-if="isGenerating" class="flex justify-start mb-8">
               <div
-                class="bg-white border border-gray-200 rounded-xl md:rounded-2xl p-4 shadow-sm flex items-center gap-3 w-auto min-w-[120px]"
+                class="bg-white border border-gray-200 rounded-xl md:rounded-2xl p-4 md:p-6 shadow-sm flex items-center gap-3 w-full md:w-auto min-w-[200px]"
               >
                 <div class="spinner"></div>
-                <span class="text-sm text-gray-500">Qwen 正在思考...</span>
+                <span class="text-sm md:text-base text-gray-500">Qwen 正在思考...</span>
+                <button
+                  @click="stopGeneration"
+                  class="ml-auto md:ml-6 text-xs md:text-sm bg-red-100 text-red-600 px-3 py-1.5 rounded hover:bg-red-200 transition-colors"
+                >
+                  停止生成
+                </button>
               </div>
             </div>
           </div>
@@ -881,9 +924,10 @@
                 v-model="inputPrompt"
                 @keydown.enter.exact.prevent="sendMessage"
                 placeholder="输入提示词... (Enter 发送, Shift+Enter 换行)"
-                class="w-full border border-gray-300 rounded-xl px-4 py-3 md:py-4 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base resize-none overflow-hidden max-h-48 min-h-[56px] shadow-sm"
+                class="w-full border border-gray-300 rounded-xl px-4 py-3 md:py-4 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base resize-none shadow-sm custom-scrollbar"
                 :disabled="isGenerating"
                 rows="1"
+                style="max-height: 12rem; overflow-y: auto"
               ></textarea>
             </div>
 
@@ -1901,12 +1945,12 @@
             const textarea = document.querySelector('textarea');
             if (textarea) {
               textarea.style.height = 'auto';
-              textarea.style.height = textarea.scrollHeight + 'px';
-              if (textarea.scrollHeight > 192) {
-                // 48rem approx max-h-48
-                textarea.style.overflowY = 'auto';
+              const scrollHeight = textarea.scrollHeight;
+              // Limit height to roughly 12rem (192px), otherwise let it scroll
+              if (scrollHeight <= 192) {
+                textarea.style.height = scrollHeight + 'px';
               } else {
-                textarea.style.overflowY = 'hidden';
+                textarea.style.height = '192px';
               }
             }
           };
