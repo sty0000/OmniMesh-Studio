@@ -16,6 +16,9 @@
     <!-- Marked for Markdown parsing -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+    <!-- Load lz-string for IndexedDB/localStorage compression if needed -->
+    <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
+
     <!-- Load Utils -->
     <script src="./utils.js"></script>
     <style>
@@ -991,119 +994,95 @@
           // Session Management
           const generateId = () => Math.random().toString(36).substr(2, 9);
           const STORAGE_KEY = 'qwen_vllm_sessions';
-          const MAX_SESSIONS = 15; // 限制最大对话数量
-          const MAX_MESSAGES_PER_SESSION = 50; // 限制每个对话的最大消息数
-          const MAX_STORAGE_MB = 4; // 预警阈值（localStorage 通常限制为 5MB）
-
-          // Helper to get rough byte size of string
-          const getStorageSize = (str) => new Blob([str]).size;
-
-          const checkStorageCapacity = (dataString) => {
-            const sizeInMB = getStorageSize(dataString) / (1024 * 1024);
-            if (sizeInMB > MAX_STORAGE_MB) {
-              console.warn(`Storage size (${sizeInMB.toFixed(2)}MB) is approaching the 5MB limit.`);
-              return false; // Tells the saver to prune
-            }
-            return true;
-          };
-
-          const pruneSessionsForStorage = (sessionsList) => {
-            // 1. Sort sessions by ID (assuming ID generation or we can use a timestamp, but we'll just trim the oldest/first ones)
-            // To be safer, we should keep the *current* session and delete the oldest.
-            let pruned = [...sessionsList];
-
-            // Limit number of sessions
-            if (pruned.length > MAX_SESSIONS) {
-              // Keep the last MAX_SESSIONS
-              pruned = pruned.slice(pruned.length - MAX_SESSIONS);
-            }
-
-            // Limit messages per session and strip heavy Base64 media from history
-            pruned = pruned.map((session) => {
-              let msgs = [...session.messages];
-
-              // Keep only the last N messages
-              if (msgs.length > MAX_MESSAGES_PER_SESSION) {
-                msgs = msgs.slice(msgs.length - MAX_MESSAGES_PER_SESSION);
-              }
-
-              // Strip base64 rawContent (images/audio) from history to save massive space
-              // The AI doesn't need the base64 in the UI history, it only needs it when sending (which we handle via pendingMedia or text fallback)
-              msgs = msgs.map((msg) => {
-                if (msg.rawContent && Array.isArray(msg.rawContent)) {
-                  const strippedRawContent = msg.rawContent.map((item) => {
-                    // If it's a media item, replace the heavy base64 URL with a placeholder
-                    if (item.type === 'image_url')
-                      return {
-                        type: 'image_url',
-                        image_url: { url: '[Image Omitted from Local Storage]' },
-                      };
-                    if (item.type === 'video_url')
-                      return {
-                        type: 'video_url',
-                        video_url: { url: '[Video Omitted from Local Storage]' },
-                      };
-                    if (item.type === 'input_audio')
-                      return {
-                        type: 'input_audio',
-                        input_audio: { data: '[Audio Omitted]', format: item.input_audio.format },
-                      };
-                    return item;
-                  });
-                  return { ...msg, rawContent: strippedRawContent };
+          // IndexedDB Wrapper for unlimited storage
+          const initDB = () => {
+            return new Promise((resolve, reject) => {
+              const request = indexedDB.open('QwenVLLMDatabase', 1);
+              request.onerror = () => reject(request.error);
+              request.onsuccess = () => resolve(request.result);
+              request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                if (!db.objectStoreNames.contains('sessions')) {
+                  db.createObjectStore('sessions', { keyPath: 'id' });
                 }
-                return msg;
-              });
-
-              return { ...session, messages: msgs };
+              };
             });
-
-            return pruned;
           };
 
-          const loadSessions = () => {
-            const stored = localStorage.getItem(STORAGE_KEY);
-            if (stored) {
-              try {
-                return JSON.parse(stored);
-              } catch (e) {
-                console.error('Failed to parse stored sessions', e);
-              }
+          const saveToIndexedDB = async (sessionsData) => {
+            try {
+              const db = await initDB();
+              const tx = db.transaction('sessions', 'readwrite');
+              const store = tx.objectStore('sessions');
+
+              // We store the entire array as a single object with a fixed key 'all_sessions'
+              // This makes it act exactly like localStorage but with huge capacity
+
+              // For massive text, we optionally compress it using lz-string
+              const jsonString = JSON.stringify(sessionsData);
+              const compressed = LZString.compressToUTF16(jsonString);
+
+              store.put({ id: 'all_sessions', data: compressed });
+
+              return new Promise((resolve, reject) => {
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error);
+              });
+            } catch (e) {
+              console.error('Failed to save to IndexedDB', e);
             }
-            return [{ id: generateId(), name: '对话 1', messages: [] }];
           };
 
-          const sessions = ref(loadSessions());
+          const loadFromIndexedDB = async () => {
+            try {
+              const db = await initDB();
+              const tx = db.transaction('sessions', 'readonly');
+              const store = tx.objectStore('sessions');
+              const request = store.get('all_sessions');
+
+              return new Promise((resolve) => {
+                request.onsuccess = () => {
+                  if (request.result && request.result.data) {
+                    try {
+                      const decompressed = LZString.decompressFromUTF16(request.result.data);
+                      resolve(JSON.parse(decompressed));
+                    } catch (e) {
+                      console.error('Failed to parse from IndexedDB', e);
+                      resolve(null);
+                    }
+                  } else {
+                    resolve(null);
+                  }
+                };
+                request.onerror = () => resolve(null);
+              });
+            } catch (e) {
+              console.error('Failed to load from IndexedDB', e);
+              return null;
+            }
+          };
+
+          // Initialize state
+          const sessions = ref([{ id: generateId(), name: '对话 1', messages: [] }]);
           const currentSessionId = ref(sessions.value[0].id);
           const editingSessionId = ref(null);
           const editingSessionName = ref('');
 
-          // Watch and save sessions to localStorage with capacity management
+          // Watch and save sessions to IndexedDB asynchronously
+          // We use a simple debounce to avoid hammering the DB on every keystroke/token
+          let saveTimeout = null;
           Vue.watch(
             sessions,
             (newSessions) => {
-              try {
-                let dataToSave = newSessions;
-                let jsonString = JSON.stringify(dataToSave);
+              if (saveTimeout) clearTimeout(saveTimeout);
+              // Create a deep clone to prevent proxy reactivity issues during async save
+              const sessionsClone = JSON.parse(JSON.stringify(newSessions));
 
-                // First pass: check if it's too big, if so, aggressively prune
-                if (!checkStorageCapacity(jsonString)) {
-                  dataToSave = pruneSessionsForStorage(newSessions);
-                  jsonString = JSON.stringify(dataToSave);
-                }
-
-                localStorage.setItem(STORAGE_KEY, jsonString);
-              } catch (e) {
-                console.error('Failed to save sessions to localStorage. Storage might be full.', e);
-                // If it still fails (e.g., QuotaExceededError), force a severe prune
-                try {
-                  const severelyPruned = pruneSessionsForStorage(newSessions);
-                  localStorage.setItem(STORAGE_KEY, JSON.stringify(severelyPruned));
-                  alert('本地存储空间已满，已自动清理最旧的对话和多模态缓存记录以释放空间。');
-                } catch (e2) {
-                  console.error('Critical: Cannot save to localStorage even after pruning.');
-                }
-              }
+              saveTimeout = setTimeout(() => {
+                saveToIndexedDB(sessionsClone).catch((err) => {
+                  console.error('Async save failed', err);
+                });
+              }, 1000); // 1 second debounce
             },
             { deep: true },
           );
@@ -1481,8 +1460,32 @@
             initialized.value = true;
           };
 
-          onMounted(() => {
+          // Load data asynchronously on mount
+          // Load data asynchronously on mount
+          onMounted(async () => {
             fetchLogAutomatically();
+
+            // Try loading from IndexedDB first (huge capacity)
+            let loadedSessions = await loadFromIndexedDB();
+
+            // Fallback to legacy localStorage if IndexedDB is empty (migration)
+            if (!loadedSessions) {
+              const legacyStored = localStorage.getItem(STORAGE_KEY);
+              if (legacyStored) {
+                try {
+                  loadedSessions = JSON.parse(legacyStored);
+                  // Optional: migrate it to IndexedDB immediately
+                  saveToIndexedDB(loadedSessions);
+                } catch (e) {
+                  console.error('Failed to parse legacy localStorage', e);
+                }
+              }
+            }
+
+            if (loadedSessions && Array.isArray(loadedSessions) && loadedSessions.length > 0) {
+              sessions.value = loadedSessions;
+              currentSessionId.value = loadedSessions[0].id;
+            }
           });
 
           const renderMarkdown = (text) => {
