@@ -403,15 +403,44 @@
 
           <!-- System Prompt Setting -->
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1"
-              >系统预设词 (System Prompt)</label
-            >
+            <div class="flex justify-between items-end mb-1">
+              <label class="block text-sm font-medium text-gray-700"
+                >系统预设词 (System Prompt)</label
+              >
+
+              <!-- Quick Select Dropdown -->
+              <div class="relative" v-if="!isSystemPromptLocked">
+                <select
+                  @change="applySystemPromptTemplate"
+                  class="text-xs bg-blue-50 text-blue-600 border border-blue-200 rounded px-1.5 py-0.5 outline-none cursor-pointer hover:bg-blue-100 appearance-none pr-4"
+                >
+                  <option value="" disabled selected>快速选择预设...</option>
+                  <option v-for="tpl in systemPromptTemplates" :key="tpl.name" :value="tpl.content">
+                    {{ tpl.name }}
+                  </option>
+                </select>
+                <!-- Custom tiny dropdown arrow -->
+                <div
+                  class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-1 text-blue-600"
+                >
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M19 9l-7 7-7-7"
+                    ></path>
+                  </svg>
+                </div>
+              </div>
+            </div>
+
             <textarea
               v-model="currentSessionSystemPrompt"
               @input="updateSessionSystemPrompt"
-              rows="3"
+              rows="4"
               placeholder="例如：你是一个资深的 Python 架构师..."
-              class="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+              class="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors resize-none"
               :class="isSystemPromptLocked ? 'bg-gray-100 border-gray-200 text-gray-500 cursor-not-allowed' : 'border-gray-300 bg-white'"
               :disabled="isSystemPromptLocked"
               :title="isSystemPromptLocked ? '对话已开始，为保证前缀缓存(Prefix Caching)命中率，系统预设词已锁定。如需修改请开启新对话。' : ''"
@@ -1104,6 +1133,63 @@
             return currentSession.value.messages;
           });
 
+          const currentSessionSystemPrompt = computed({
+            get: () => currentSession.value.systemPrompt || '',
+            set: (val) => {
+              if (!isSystemPromptLocked.value) {
+                currentSession.value.systemPrompt = val;
+              }
+            },
+          });
+
+          const isSystemPromptLocked = computed(() => {
+            // Lock the prompt if there are any messages in the current session
+            return currentSession.value.messages && currentSession.value.messages.length > 0;
+          });
+
+          const updateSessionSystemPrompt = (e) => {
+            if (!isSystemPromptLocked.value) {
+              currentSessionSystemPrompt.value = e.target.value;
+            }
+          };
+
+          // Default System Prompt Templates
+          const systemPromptTemplates = [
+            {
+              name: '代码专家',
+              content:
+                '你是一个资深的程序员和软件架构师。请提供清晰、高效、带有详尽注释的代码，并在给出代码前简要说明你的设计思路。如果用户的需求有逻辑漏洞，请指出并提供更好的方案。',
+            },
+            {
+              name: '学术翻译',
+              content:
+                '你是一个专业的学术翻译专家。请将用户输入的文本在中文和英文之间进行互译。要求：语言必须符合学术期刊的正式、严谨风格，准确使用专业术语，句子结构需符合目标语言的母语习惯，不要有明显的机翻感。',
+            },
+            {
+              name: '逻辑推理大师',
+              content:
+                '你是一个逻辑极其严密的推理专家。在回答问题时，请务必进行极其深度的、多步骤的思考。请列出所有可能的情况，逐一分析排除，并在最后给出唯一正确的结论。',
+            },
+            {
+              name: '前端开发 (Vue/React)',
+              content:
+                '你是一个现代前端开发专家，精通 Vue 3, React, Tailwind CSS 和现代工程化。请在回答时侧重于用户体验（UX）、响应式设计、可访问性（a11y）以及组件的高复用性。代码需直接可用。',
+            },
+            {
+              name: 'JSON 格式化输出',
+              content:
+                '你是一个数据提取和转换引擎。无论用户输入什么，你只能输出合法的、可被 JSON.parse() 解析的纯 JSON 字符串。绝对不能输出任何解释性文字，不要使用 Markdown 代码块包裹，只输出 JSON 文本。',
+            },
+          ];
+
+          const applySystemPromptTemplate = (e) => {
+            if (!isSystemPromptLocked.value) {
+              currentSessionSystemPrompt.value = e.target.value;
+              // reset the select to default placeholder
+              e.target.value = '';
+            }
+          };
+
           const createNewSession = () => {
             const newId = generateId();
             sessions.value.push({
@@ -1166,7 +1252,7 @@
           const clearCurrentChat = () => {
             if (currentSession.value) {
               currentSession.value.messages = [];
-              currentSession.value.systemPrompt = ''; // Also clear the bound system prompt if they want a completely fresh start
+              currentSession.value.systemPrompt = '';
               // Force an immediate save to database to guarantee clear persists
               const sessionsClone = JSON.parse(JSON.stringify(sessions.value));
               saveToIndexedDB(sessionsClone).catch((err) => {
@@ -1907,6 +1993,8 @@
             currentSessionSystemPrompt,
             isSystemPromptLocked,
             updateSessionSystemPrompt,
+            systemPromptTemplates,
+            applySystemPromptTemplate,
             multiTurn,
             sessions,
             currentSessionId,
