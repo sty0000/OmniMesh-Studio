@@ -407,12 +407,22 @@
               >系统预设词 (System Prompt)</label
             >
             <textarea
-              v-model="systemPrompt"
+              v-model="currentSessionSystemPrompt"
+              @input="updateSessionSystemPrompt"
               rows="3"
               placeholder="例如：你是一个资深的 Python 架构师..."
-              class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              class="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+              :class="isSystemPromptLocked ? 'bg-gray-100 border-gray-200 text-gray-500 cursor-not-allowed' : 'border-gray-300 bg-white'"
+              :disabled="isSystemPromptLocked"
+              :title="isSystemPromptLocked ? '对话已开始，为保证前缀缓存(Prefix Caching)命中率，系统预设词已锁定。如需修改请开启新对话。' : ''"
             ></textarea>
-            <p class="text-[10px] text-gray-400 mt-1">全局设定模型的角色和行为规范。</p>
+            <p
+              class="text-[10px] mt-1"
+              :class="isSystemPromptLocked ? 'text-orange-500' : 'text-gray-400'"
+            >
+              <span v-if="isSystemPromptLocked">🔒 预设词已锁定 (保障推理加速)</span>
+              <span v-else>设定当前对话的模型角色。开始对话后将锁定。</span>
+            </p>
           </div>
 
           <h3 class="font-bold text-gray-700 border-b pb-2 mt-2">采样参数</h3>
@@ -960,7 +970,6 @@
           const activePreset = ref('balanced');
           const sidebarOpen = ref(true);
           const settingsOpen = ref(false);
-          const systemPrompt = ref('');
           const autoScrollEnabled = ref(true);
 
           const applyPreset = (presetName) => {
@@ -1138,14 +1147,33 @@
             if (isGenerating.value) return;
             const index = sessions.value.findIndex((s) => s.id === id);
             if (index > -1) {
+              // Ensure the session is completely removed from the array
               sessions.value.splice(index, 1);
+
+              // If we deleted the currently active session, switch to a nearby one
               if (currentSessionId.value === id) {
                 currentSessionId.value = sessions.value[Math.max(0, index - 1)].id;
               }
+
+              // Force an immediate save to database to guarantee deletion persists
+              const sessionsClone = JSON.parse(JSON.stringify(sessions.value));
+              saveToIndexedDB(sessionsClone).catch((err) => {
+                console.error('Immediate save after deletion failed', err);
+              });
             }
           };
 
-          // Media upload state
+          const clearCurrentChat = () => {
+            if (currentSession.value) {
+              currentSession.value.messages = [];
+              currentSession.value.systemPrompt = ''; // Also clear the bound system prompt if they want a completely fresh start
+              // Force an immediate save to database to guarantee clear persists
+              const sessionsClone = JSON.parse(JSON.stringify(sessions.value));
+              saveToIndexedDB(sessionsClone).catch((err) => {
+                console.error('Immediate save after clear failed', err);
+              });
+            }
+          };
           const pendingMedia = ref([]);
           const mediaError = ref('');
 
@@ -1461,7 +1489,6 @@
           };
 
           // Load data asynchronously on mount
-          // Load data asynchronously on mount
           onMounted(async () => {
             fetchLogAutomatically();
 
@@ -1564,9 +1591,15 @@
                 });
             }
 
-            // Inject System Prompt if available
-            if (systemPrompt.value && systemPrompt.value.trim() !== '') {
-              chatMessages.unshift({ role: 'system', content: systemPrompt.value.trim() });
+            // Inject System Prompt if available for this specific session
+            if (
+              currentSessionSystemPrompt.value &&
+              currentSessionSystemPrompt.value.trim() !== ''
+            ) {
+              chatMessages.unshift({
+                role: 'system',
+                content: currentSessionSystemPrompt.value.trim(),
+              });
             }
 
             // Construct current message content
@@ -1871,7 +1904,9 @@
             onParamChange,
             sidebarOpen,
             settingsOpen,
-            systemPrompt,
+            currentSessionSystemPrompt,
+            isSystemPromptLocked,
+            updateSessionSystemPrompt,
             multiTurn,
             sessions,
             currentSessionId,
