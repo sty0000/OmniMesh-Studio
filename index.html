@@ -908,7 +908,8 @@
             <div class="flex-1 relative flex items-end">
               <textarea
                 v-model="inputPrompt"
-                @keydown.enter.exact.prevent="sendMessage"
+                @keydown.enter.exact.prevent="!isGenerating && sendMessage()"
+                @input="adjustTextareaHeight"
                 placeholder="输入提示词... (Enter 发送, Shift+Enter 换行)"
                 class="w-full border border-gray-300 rounded-xl px-4 py-3 md:py-4 pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base resize-none shadow-sm custom-scrollbar transition-all duration-200"
                 :style="textareaStyle"
@@ -965,38 +966,40 @@
             </button>
 
             <!-- Send / Stop Button Toggle -->
-            <button
-              v-if="!isGenerating"
-              type="submit"
-              class="bg-blue-600 hover:bg-blue-700 text-white px-6 md:px-8 py-3 md:py-4 rounded-xl font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 flex-shrink-0 shadow-md hover:shadow-lg w-[100px] md:w-[120px]"
-              :disabled="(!inputPrompt.trim() && pendingMedia.length === 0)"
-            >
-              <span class="hidden md:inline text-lg">发送</span>
-              <svg
-                class="w-5 h-5 md:w-6 md:h-6"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+            <div class="flex-shrink-0 w-[100px] md:w-[120px] h-[48px] md:h-[56px] relative">
+              <button
+                v-if="!isGenerating"
+                type="submit"
+                class="absolute inset-0 w-full h-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-md hover:shadow-lg"
+                :disabled="(!inputPrompt.trim() && pendingMedia.length === 0)"
               >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                ></path>
-              </svg>
-            </button>
-            <button
-              v-else
-              type="button"
-              @click.prevent="stopGeneration"
-              class="bg-red-500 hover:bg-red-600 text-white px-6 md:px-8 py-3 md:py-4 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 flex-shrink-0 shadow-md hover:shadow-lg w-[100px] md:w-[120px] animate-pulse"
-            >
-              <span class="hidden md:inline text-lg">停止</span>
-              <svg class="w-5 h-5 md:w-6 md:h-6" fill="currentColor" viewBox="0 0 24 24">
-                <rect x="6" y="6" width="12" height="12" rx="2" ry="2"></rect>
-              </svg>
-            </button>
+                <span class="hidden md:inline text-lg">发送</span>
+                <svg
+                  class="w-5 h-5 md:w-6 md:h-6"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+                  ></path>
+                </svg>
+              </button>
+              <button
+                v-else
+                type="button"
+                @click.prevent="stopGeneration"
+                class="absolute inset-0 w-full h-full bg-red-500 hover:bg-red-600 text-white rounded-xl font-bold transition-colors flex items-center justify-center gap-2 shadow-md hover:shadow-lg animate-pulse"
+              >
+                <span class="hidden md:inline text-lg">停止</span>
+                <svg class="w-5 h-5 md:w-6 md:h-6" fill="currentColor" viewBox="0 0 24 24">
+                  <rect x="6" y="6" width="12" height="12" rx="2" ry="2"></rect>
+                </svg>
+              </button>
+            </div>
           </form>
         </div>
       </footer>
@@ -1994,7 +1997,7 @@
                 const scrollHeight = textarea.scrollHeight;
 
                 // Base single line height is roughly 56px.
-                // Max height for normal mode is roughly 7 lines (approx 160px).
+                // Max height for normal mode is roughly 7 lines (approx 192px).
                 // Max height for expanded mode is roughly 23 lines (approx 550px).
 
                 if (isTextareaExpanded.value) {
@@ -2006,11 +2009,11 @@
                     textareaStyle.overflowY = 'auto';
                   }
                 } else {
-                  if (scrollHeight <= 160) {
+                  if (scrollHeight <= 192) {
                     textareaStyle.height = scrollHeight + 'px';
                     textareaStyle.overflowY = 'hidden';
                   } else {
-                    textareaStyle.height = '160px';
+                    textareaStyle.height = '192px';
                     textareaStyle.overflowY = 'auto';
                   }
                 }
