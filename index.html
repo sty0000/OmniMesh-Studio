@@ -991,6 +991,76 @@
           // Session Management
           const generateId = () => Math.random().toString(36).substr(2, 9);
           const STORAGE_KEY = 'qwen_vllm_sessions';
+          const MAX_SESSIONS = 15; // 限制最大对话数量
+          const MAX_MESSAGES_PER_SESSION = 50; // 限制每个对话的最大消息数
+          const MAX_STORAGE_MB = 4; // 预警阈值（localStorage 通常限制为 5MB）
+
+          // Helper to get rough byte size of string
+          const getStorageSize = (str) => new Blob([str]).size;
+
+          const checkStorageCapacity = (dataString) => {
+            const sizeInMB = getStorageSize(dataString) / (1024 * 1024);
+            if (sizeInMB > MAX_STORAGE_MB) {
+              console.warn(`Storage size (${sizeInMB.toFixed(2)}MB) is approaching the 5MB limit.`);
+              return false; // Tells the saver to prune
+            }
+            return true;
+          };
+
+          const pruneSessionsForStorage = (sessionsList) => {
+            // 1. Sort sessions by ID (assuming ID generation or we can use a timestamp, but we'll just trim the oldest/first ones)
+            // To be safer, we should keep the *current* session and delete the oldest.
+            let pruned = [...sessionsList];
+
+            // Limit number of sessions
+            if (pruned.length > MAX_SESSIONS) {
+              // Keep the last MAX_SESSIONS
+              pruned = pruned.slice(pruned.length - MAX_SESSIONS);
+            }
+
+            // Limit messages per session and strip heavy Base64 media from history
+            pruned = pruned.map((session) => {
+              let msgs = [...session.messages];
+
+              // Keep only the last N messages
+              if (msgs.length > MAX_MESSAGES_PER_SESSION) {
+                msgs = msgs.slice(msgs.length - MAX_MESSAGES_PER_SESSION);
+              }
+
+              // Strip base64 rawContent (images/audio) from history to save massive space
+              // The AI doesn't need the base64 in the UI history, it only needs it when sending (which we handle via pendingMedia or text fallback)
+              msgs = msgs.map((msg) => {
+                if (msg.rawContent && Array.isArray(msg.rawContent)) {
+                  const strippedRawContent = msg.rawContent.map((item) => {
+                    // If it's a media item, replace the heavy base64 URL with a placeholder
+                    if (item.type === 'image_url')
+                      return {
+                        type: 'image_url',
+                        image_url: { url: '[Image Omitted from Local Storage]' },
+                      };
+                    if (item.type === 'video_url')
+                      return {
+                        type: 'video_url',
+                        video_url: { url: '[Video Omitted from Local Storage]' },
+                      };
+                    if (item.type === 'input_audio')
+                      return {
+                        type: 'input_audio',
+                        input_audio: { data: '[Audio Omitted]', format: item.input_audio.format },
+                      };
+                    return item;
+                  });
+                  return { ...msg, rawContent: strippedRawContent };
+                }
+                return msg;
+              });
+
+              return { ...session, messages: msgs };
+            });
+
+            return pruned;
+          };
+
           const loadSessions = () => {
             const stored = localStorage.getItem(STORAGE_KEY);
             if (stored) {
@@ -1008,11 +1078,32 @@
           const editingSessionId = ref(null);
           const editingSessionName = ref('');
 
-          // Watch and save sessions to localStorage
+          // Watch and save sessions to localStorage with capacity management
           Vue.watch(
             sessions,
             (newSessions) => {
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(newSessions));
+              try {
+                let dataToSave = newSessions;
+                let jsonString = JSON.stringify(dataToSave);
+
+                // First pass: check if it's too big, if so, aggressively prune
+                if (!checkStorageCapacity(jsonString)) {
+                  dataToSave = pruneSessionsForStorage(newSessions);
+                  jsonString = JSON.stringify(dataToSave);
+                }
+
+                localStorage.setItem(STORAGE_KEY, jsonString);
+              } catch (e) {
+                console.error('Failed to save sessions to localStorage. Storage might be full.', e);
+                // If it still fails (e.g., QuotaExceededError), force a severe prune
+                try {
+                  const severelyPruned = pruneSessionsForStorage(newSessions);
+                  localStorage.setItem(STORAGE_KEY, JSON.stringify(severelyPruned));
+                  alert('本地存储空间已满，已自动清理最旧的对话和多模态缓存记录以释放空间。');
+                } catch (e2) {
+                  console.error('Critical: Cannot save to localStorage even after pruning.');
+                }
+              }
             },
             { deep: true },
           );
