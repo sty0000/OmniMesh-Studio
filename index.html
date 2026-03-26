@@ -1724,6 +1724,14 @@
               abortController.abort();
               abortController = null;
               isGenerating.value = false;
+
+              // Also ensure we stop any "thinking" state on the current assistant message
+              if (messages.value.length > 0) {
+                const lastMsg = messages.value[messages.value.length - 1];
+                if (lastMsg.role === 'assistant' && lastMsg.isThinking) {
+                  lastMsg.isThinking = false;
+                }
+              }
             }
           };
 
@@ -1961,6 +1969,11 @@
                 messages.value[targetIndex].error = err.message || '请求超时或网络异常';
               }
             } finally {
+              // Always ensure thinking state is cleared when generation ends (normally, errored, or aborted)
+              if (messages.value[targetIndex] && messages.value[targetIndex].isThinking) {
+                messages.value[targetIndex].isThinking = false;
+              }
+
               isGenerating.value = false;
               abortController = null;
               scrollToBottom();
