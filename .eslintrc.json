@@ -6,13 +6,8 @@
     "jest": true
   },
   "extends": "eslint:recommended",
-  "plugins": [
-    "html"
-  ],
-  "ignorePatterns": [
-    "coverage/",
-    "dist/"
-  ],
+  "plugins": ["html"],
+  "ignorePatterns": ["coverage/", "dist/"],
   "globals": {
     "Vue": "readonly",
     "marked": "readonly",
