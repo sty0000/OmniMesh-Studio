@@ -1324,6 +1324,7 @@
           // Maximum limits based on standard API constraints (can be adjusted)
           const MAX_IMAGES = 2;
           const MAX_VIDEOS = 1;
+          const MAX_AUDIOS = 1;
           const MAX_FILE_SIZE_MB = 10;
 
           const handleMediaUpload = (event) => {
@@ -1334,6 +1335,7 @@
 
             let currentImages = pendingMedia.value.filter((m) => m.type === 'image').length;
             let currentVideos = pendingMedia.value.filter((m) => m.type === 'video').length;
+            let currentAudios = pendingMedia.value.filter((m) => m.type === 'audio').length;
 
             files.forEach((file) => {
               // Check file size
@@ -1359,7 +1361,11 @@
                 }
                 currentVideos++;
               } else if (isAudio) {
-                // Assuming similar constraints for audio if needed, or unlimited.
+                if (currentAudios >= MAX_AUDIOS) {
+                  mediaError.value = `最多只能上传 ${MAX_AUDIOS} 个音频`;
+                  return;
+                }
+                currentAudios++;
               } else {
                 mediaError.value = '不支持的文件格式';
                 return;
