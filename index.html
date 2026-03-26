@@ -760,21 +760,7 @@
               </div>
             </div>
 
-            <!-- Typing Indicator -->
-            <div v-if="isGenerating" class="flex justify-start mb-8">
-              <div
-                class="bg-white border border-gray-200 rounded-xl md:rounded-2xl p-4 md:p-6 shadow-sm flex items-center gap-3 w-full md:w-auto min-w-[200px]"
-              >
-                <div class="spinner"></div>
-                <span class="text-sm md:text-base text-gray-500">Qwen 正在思考...</span>
-                <button
-                  @click="stopGeneration"
-                  class="ml-auto md:ml-6 text-xs md:text-sm bg-red-100 text-red-600 px-3 py-1.5 rounded hover:bg-red-200 transition-colors"
-                >
-                  停止生成
-                </button>
-              </div>
-            </div>
+            <!-- Typing Indicator is REMOVED from here as requested -->
           </div>
         </div>
 
@@ -919,16 +905,40 @@
               multiple
             />
 
-            <div class="flex-1 relative">
+            <div class="flex-1 relative flex items-end">
               <textarea
                 v-model="inputPrompt"
                 @keydown.enter.exact.prevent="sendMessage"
                 placeholder="输入提示词... (Enter 发送, Shift+Enter 换行)"
-                class="w-full border border-gray-300 rounded-xl px-4 py-3 md:py-4 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base resize-none shadow-sm custom-scrollbar"
-                :disabled="isGenerating"
+                class="w-full border border-gray-300 rounded-xl px-4 py-3 md:py-4 pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base resize-none shadow-sm custom-scrollbar transition-all duration-200"
+                :style="textareaStyle"
                 rows="1"
-                style="max-height: 12rem; overflow-y: auto"
               ></textarea>
+              <!-- Expand Button (only show if height exceeds 3 lines) -->
+              <button
+                v-if="showExpandButton"
+                @click="toggleTextareaExpand"
+                type="button"
+                class="absolute right-2 top-2 p-1.5 bg-gray-100 hover:bg-gray-200 text-gray-500 rounded-md transition-colors"
+                :title="isTextareaExpanded ? '收起输入框' : '展开输入框'"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    v-if="!isTextareaExpanded"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"
+                  ></path>
+                  <path
+                    v-else
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M4 14h4v4m0-4l-5 5m15-5h-4v4m0-4l5 5M4 10h4V6m0 4l-5-5m15 5h-4V6m0 4l5-5"
+                  ></path>
+                </svg>
+              </button>
             </div>
 
             <!-- Voice Input Button -->
@@ -954,10 +964,12 @@
               </svg>
             </button>
 
+            <!-- Send / Stop Button Toggle -->
             <button
+              v-if="!isGenerating"
               type="submit"
-              class="bg-blue-600 hover:bg-blue-700 text-white px-6 md:px-8 py-3 md:py-4 rounded-xl font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 flex-shrink-0 shadow-md hover:shadow-lg"
-              :disabled="(!inputPrompt.trim() && pendingMedia.length === 0) || isGenerating"
+              class="bg-blue-600 hover:bg-blue-700 text-white px-6 md:px-8 py-3 md:py-4 rounded-xl font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 flex-shrink-0 shadow-md hover:shadow-lg w-[100px] md:w-[120px]"
+              :disabled="(!inputPrompt.trim() && pendingMedia.length === 0)"
             >
               <span class="hidden md:inline text-lg">发送</span>
               <svg
@@ -972,6 +984,17 @@
                   stroke-width="2"
                   d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
                 ></path>
+              </svg>
+            </button>
+            <button
+              v-else
+              type="button"
+              @click.prevent="stopGeneration"
+              class="bg-red-500 hover:bg-red-600 text-white px-6 md:px-8 py-3 md:py-4 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 flex-shrink-0 shadow-md hover:shadow-lg w-[100px] md:w-[120px] animate-pulse"
+            >
+              <span class="hidden md:inline text-lg">停止</span>
+              <svg class="w-5 h-5 md:w-6 md:h-6" fill="currentColor" viewBox="0 0 24 24">
+                <rect x="6" y="6" width="12" height="12" rx="2" ry="2"></rect>
               </svg>
             </button>
           </form>
@@ -1941,17 +1964,57 @@
             }
           };
 
+          const showExpandButton = computed(() => {
+            // If the textarea has scrolled past a certain height, or contains more than 3 newlines
+            const lineCount = (inputPrompt.value.match(/\n/g) || []).length + 1;
+            return lineCount >= 3;
+          });
+
+          const textareaStyle = reactive({
+            height: 'auto',
+            overflowY: 'hidden',
+          });
+
+          const isTextareaExpanded = ref(false);
+
+          const toggleTextareaExpand = () => {
+            isTextareaExpanded.value = !isTextareaExpanded.value;
+            nextTick(() => {
+              adjustTextareaHeight();
+            });
+          };
+
           const adjustTextareaHeight = () => {
             const textarea = document.querySelector('textarea');
             if (textarea) {
-              textarea.style.height = 'auto';
-              const scrollHeight = textarea.scrollHeight;
-              // Limit height to roughly 12rem (192px), otherwise let it scroll
-              if (scrollHeight <= 192) {
-                textarea.style.height = scrollHeight + 'px';
-              } else {
-                textarea.style.height = '192px';
-              }
+              // Temporarily reset height to get true scrollHeight
+              textareaStyle.height = 'auto';
+
+              nextTick(() => {
+                const scrollHeight = textarea.scrollHeight;
+
+                // Base single line height is roughly 56px.
+                // Max height for normal mode is roughly 7 lines (approx 160px).
+                // Max height for expanded mode is roughly 23 lines (approx 550px).
+
+                if (isTextareaExpanded.value) {
+                  if (scrollHeight <= 550) {
+                    textareaStyle.height = scrollHeight + 'px';
+                    textareaStyle.overflowY = 'hidden';
+                  } else {
+                    textareaStyle.height = '550px';
+                    textareaStyle.overflowY = 'auto';
+                  }
+                } else {
+                  if (scrollHeight <= 160) {
+                    textareaStyle.height = scrollHeight + 'px';
+                    textareaStyle.overflowY = 'hidden';
+                  } else {
+                    textareaStyle.height = '160px';
+                    textareaStyle.overflowY = 'auto';
+                  }
+                }
+              });
             }
           };
 
