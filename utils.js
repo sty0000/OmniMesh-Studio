@@ -110,6 +110,22 @@ async function* parseSSE(body) {
   }
 }
 
+/**
+ * Formats a Date object to YYYY-MM-DD HH:mm:ss
+ * @param {Date} date - The date to format
+ * @returns {string} Formatted date string
+ */
+function formatCurrentTime(date = new Date()) {
+  const pad = (n) => n.toString().padStart(2, '0');
+  const YYYY = date.getFullYear();
+  const MM = pad(date.getMonth() + 1);
+  const DD = pad(date.getDate());
+  const HH = pad(date.getHours());
+  const mm = pad(date.getMinutes());
+  const ss = pad(date.getSeconds());
+  return `${YYYY}-${MM}-${DD} ${HH}:${mm}:${ss}`;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseServiceLog, validateParams, parseSSE };
+  module.exports = { parseServiceLog, validateParams, parseSSE, formatCurrentTime };
 }

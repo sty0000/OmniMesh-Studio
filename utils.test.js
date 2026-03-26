@@ -1,5 +1,42 @@
 import { describe, it, expect } from 'vitest';
-const { parseServiceLog, validateParams, parseSSE } = require('./utils.js');
+import fs from 'fs';
+import path from 'path';
+
+const htmlContent = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf-8');
+const scriptMatch = htmlContent.match(/<script>\s*([\s\S]*?)const \{ createApp/);
+if (!scriptMatch) {
+  throw new Error('Could not find script content in index.html');
+}
+
+// We also need to read utils.js to make sure its functions are available in the mock module scope
+// because index.html relies on utils.js being loaded globally.
+const utilsContent = fs.readFileSync(path.join(__dirname, 'utils.js'), 'utf-8');
+
+const scriptContent = utilsContent + '\n' + scriptMatch[1];
+// Mock module.exports to capture the exported functions
+const mockModule = { exports: {} };
+const fn = new Function('module', scriptContent);
+fn(mockModule);
+
+const { parseServiceLog, validateParams, parseSSE, formatCurrentTime } = mockModule.exports;
+
+describe('formatCurrentTime', () => {
+  it('should format date correctly', () => {
+    // Note: JS Date month is 0-indexed
+    const mockDate = new Date(2023, 9, 5, 14, 30, 9); // 2023-10-05 14:30:09
+    const formatted = formatCurrentTime(mockDate);
+    expect(formatted).toBe('2023-10-05 14:30:09');
+  });
+
+  it('should pad single digits with zero', () => {
+    const mockDate = new Date(2024, 0, 1, 9, 5, 2); // 2024-01-01 09:05:02
+    // Also test system prompt replacement logic by directly accessing the buildPayload logic from mock
+    // Note: Since buildPayload is not exported and is part of Vue setup, we test the text replacement part here
+    const template = '你是Qwen3-Omni-Thinking，现在是<时间>。';
+    const replaced = template.replace(/<时间>/g, formatCurrentTime(mockDate));
+    expect(replaced).toBe('你是Qwen3-Omni-Thinking，现在是2024-01-01 09:05:02。');
+  });
+});
 
 describe('parseServiceLog', () => {
   it('should parse model name correctly', () => {
