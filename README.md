@@ -7,13 +7,16 @@
 为了让团队中的其他人也能通过 SSH 轻松使用这个客户端，请按照以下步骤在您的 Linux 服务器（如 DRX Spark）上进行部署和重启服务。
 
 ### 1. 准备代码与启动脚本
+
 确保您的服务器上有一个专门的目录存放这些文件（例如 `~/qwen-web-client`）。将本项目的 `index.html`, `utils.js` 等文件放入其中。
 
 同时，确保您的启动脚本（如 `start_vllm.sh`）也放在同级目录，或者能在该目录下执行。
 **注意**：为了支持音频输入，请确保您的脚本中 `--limit-mm-per-prompt` 参数包含了 `audio`（如：`'{"image":2,"video":1,"audio":1}'`）。
 
 ### 2. 重启 vLLM 服务
+
 如果之前有旧的 vLLM 服务在运行，需要先将其停止：
+
 ```bash
 # 查找正在运行的 vLLM 进程
 ps aux | grep vllm.entrypoints.openai.api_server
@@ -26,20 +29,24 @@ bash start_vllm.sh
 ```
 
 ### 3. 启动前端静态文件服务
+
 为了让前端能被访问，我们需要在这个目录下启动一个轻量级的 Web 服务器。推荐使用 Python 自带的 `http.server`，并将其放到后台运行（例如监听 3000 端口）：
+
 ```bash
 # 在存放 index.html 的目录下执行：
 nohup python3 -m http.server 3000 > frontend.log 2>&1 &
 ```
 
 ### 4. 团队成员如何访问 (通过 SSH)
+
 现在，服务已经在服务器上跑起来了（vLLM 在 8000 端口，前端在 3000 端口）。
 任何有服务器 SSH 登录权限的团队成员，只需要在**他们自己的电脑（Windows/Mac）**上打开终端，执行以下命令建立端口转发：
 
 ```bash
 ssh -L 8000:localhost:8000 -L 3000:localhost:3000 user@您的服务器IP
 ```
-*(注意：保持这个终端窗口打开，不要关闭)*
+
+_(注意：保持这个终端窗口打开，不要关闭)_
 
 建立隧道后，团队成员只需在自己电脑的浏览器中访问：
 👉 **http://localhost:3000**

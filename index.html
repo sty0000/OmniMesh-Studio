@@ -411,10 +411,12 @@
               <!-- Quick Select Dropdown -->
               <div class="relative" v-if="!isSystemPromptLocked">
                 <select
+                  v-model="selectedTemplate"
                   @change="applySystemPromptTemplate"
-                  class="text-xs bg-blue-50 text-blue-600 border border-blue-200 rounded px-1.5 py-0.5 outline-none cursor-pointer hover:bg-blue-100 appearance-none pr-4"
+                  class="text-xs bg-blue-50 text-blue-600 border border-blue-200 rounded px-1.5 py-0.5 outline-none cursor-pointer hover:bg-blue-100 appearance-none pr-4 max-w-[120px] truncate"
                 >
-                  <option value="" disabled selected>快速选择预设...</option>
+                  <option value="" disabled>快速选择预设...</option>
+                  <option value="custom">自定义</option>
                   <option v-for="tpl in systemPromptTemplates" :key="tpl.name" :value="tpl.content">
                     {{ tpl.name }}
                   </option>
@@ -1150,8 +1152,35 @@
           const updateSessionSystemPrompt = (e) => {
             if (!isSystemPromptLocked.value) {
               currentSessionSystemPrompt.value = e.target.value;
+              // If user manually types, set dropdown to 'custom'
+              selectedTemplate.value = 'custom';
             }
           };
+
+          const selectedTemplate = ref('');
+
+          // Sync dropdown with current session's prompt when switching sessions
+          Vue.watch(
+            currentSessionSystemPrompt,
+            (newVal) => {
+              if (!newVal) {
+                selectedTemplate.value = '';
+                return;
+              }
+              // Check if current prompt matches any template (ignoring the dynamic <时间> replacement for matching)
+              const matchedTemplate = systemPromptTemplates.find((tpl) => {
+                // If it's the time template, the actual prompt might contain real time,
+                // but before sending it contains `<时间>`. So exact match is fine here for the dropdown state.
+                return tpl.content === newVal;
+              });
+              if (matchedTemplate) {
+                selectedTemplate.value = matchedTemplate.content;
+              } else {
+                selectedTemplate.value = 'custom';
+              }
+            },
+            { immediate: true },
+          );
 
           // Default System Prompt Templates
           const systemPromptTemplates = [
@@ -1189,14 +1218,14 @@
 
           const applySystemPromptTemplate = (e) => {
             if (!isSystemPromptLocked.value) {
-              let templateContent = e.target.value;
-              // Replace <时间> placeholder with current time
-              if (templateContent.includes('<时间>')) {
-                templateContent = templateContent.replace(/<时间>/g, formatCurrentTime());
+              if (e.target.value === 'custom') {
+                // Do nothing to the text, just let user edit
+                return;
               }
+              let templateContent = e.target.value;
+              // Note: We keep the <时间> placeholder in the text area so user knows it's dynamic.
+              // It will be replaced when actually sending the payload.
               currentSessionSystemPrompt.value = templateContent;
-              // reset the select to default placeholder
-              e.target.value = '';
             }
           };
 
@@ -2002,6 +2031,7 @@
             updateSessionSystemPrompt,
             systemPromptTemplates,
             applySystemPromptTemplate,
+            selectedTemplate,
             multiTurn,
             sessions,
             currentSessionId,
