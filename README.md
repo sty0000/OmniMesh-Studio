@@ -1,55 +1,50 @@
-# Qwen vLLM Web UI
+# Qwen vLLM Web Client
 
-这是一个专为基于 vLLM 部署的 Qwen 模型定制的轻量级 Web 前端页面。它允许你直接通过浏览器连接到部署在 Linux 服务器并通过 SSH 转发到本地端口（如 `localhost:8000`）的 vLLM 服务。
+这是一个专为 Qwen (特别是 Qwen3-Omni-Thinking 等多模态强推理模型) 打造的纯静态、高性能本地 Web 客户端。它支持流式打字机输出、思考过程折叠、多模态输入（图片/视频/音频上传与麦克风录音）、多对话并发管理以及基于 IndexedDB 的无限容量本地历史记录存储。
 
-## 特性
+## 如何部署与使用 (适合团队共享)
 
-- **开箱即用**: 原生 HTML/CSS/JS (基于 Vue 3 和 Tailwind CSS CDN)，无需编译，静态资源直接双击 `index.html` 即可使用。
-- **自动解析配置**: 能够读取同目录下的 `service_start_log.txt` 自动提取服务 API 地址、模型名称、最大上下文和 API Key。
-- **流式输出**: 实时流式响应（SSE），支持打字机效果。
-- **多轮对话**: 支持切换多轮对话/单轮对话模式。
-- **参数调节**: 可视化调节 Temperature, Top P, Max Tokens。
-- **性能体验**: 自动捕获首字响应时间 (TTFT) 与 Token 消耗统计，具备网络异常与超限报错的一键重试功能。
+为了让团队中的其他人也能通过 SSH 轻松使用这个客户端，请按照以下步骤在您的 Linux 服务器（如 DRX Spark）上进行部署和重启服务。
 
-## 启动与使用步骤
+### 1. 准备代码与启动脚本
+确保您的服务器上有一个专门的目录存放这些文件（例如 `~/qwen-web-client`）。将本项目的 `index.html`, `utils.js` 等文件放入其中。
 
-### 1. 服务部署与端口转发
+同时，确保您的启动脚本（如 `start_vllm.sh`）也放在同级目录，或者能在该目录下执行。
+**注意**：为了支持音频输入，请确保您的脚本中 `--limit-mm-per-prompt` 参数包含了 `audio`（如：`'{"image":2,"video":1,"audio":1}'`）。
 
-假设你的 vLLM 部署在远程 Linux 服务器，使用以下命令将服务器的 8000 端口转发到本地：
-
+### 2. 重启 vLLM 服务
+如果之前有旧的 vLLM 服务在运行，需要先将其停止：
 ```bash
-ssh -L 8000:localhost:8000 user@your_server_ip
+# 查找正在运行的 vLLM 进程
+ps aux | grep vllm.entrypoints.openai.api_server
+
+# 杀掉对应的进程 (替换 PID 为实际进程号)
+kill -9 <PID>
+
+# 重新运行您的启动脚本 (它会自动在后台运行并监听 8000 端口)
+bash start_vllm.sh
 ```
 
-或者如果你在本地 WSL 中运行：
-
+### 3. 启动前端静态文件服务
+为了让前端能被访问，我们需要在这个目录下启动一个轻量级的 Web 服务器。推荐使用 Python 自带的 `http.server`，并将其放到后台运行（例如监听 3000 端口）：
 ```bash
-# 本地 WSL 默认共享网络，通常直接通过 localhost:8000 即可访问。
+# 在存放 index.html 的目录下执行：
+nohup python3 -m http.server 3000 > frontend.log 2>&1 &
 ```
 
-### 2. 生成日志文件
-
-在启动 vLLM API Server 时，将启动日志保存到 `service_start_log.txt` 中。例如：
+### 4. 团队成员如何访问 (通过 SSH)
+现在，服务已经在服务器上跑起来了（vLLM 在 8000 端口，前端在 3000 端口）。
+任何有服务器 SSH 登录权限的团队成员，只需要在**他们自己的电脑（Windows/Mac）**上打开终端，执行以下命令建立端口转发：
 
 ```bash
-python -m vllm.entrypoints.openai.api_server --model Qwen/Qwen1.5-7B-Chat --max-model-len 32768 --api-key sk-123456789 > service_start_log.txt 2>&1
+ssh -L 8000:localhost:8000 -L 3000:localhost:3000 user@您的服务器IP
 ```
+*(注意：保持这个终端窗口打开，不要关闭)*
 
-将该日志文件拷贝到与 `index.html` 相同的目录下。
+建立隧道后，团队成员只需在自己电脑的浏览器中访问：
+👉 **http://localhost:3000**
 
-### 3. 打开页面
-
-直接在文件管理器中双击 `index.html`。
-
-> **注意**: 现代浏览器由于跨域和安全策略（CORS），在通过 `file://` 协议打开时无法自动读取同目录下的 txt 文件。页面会弹出一个提示框，要求你**手动选择** `service_start_log.txt` 文件，即可完成初始化。
->
-> 如果你想让其自动读取，可以在该目录下启动一个简单的本地 HTTP 服务：
->
-> ```bash
-> python -m http.server 3000
-> ```
->
-> 然后在浏览器访问 `http://localhost:3000/index.html`。
+即可直接进入现代化、全屏响应式的 AI 对话界面，享受 64k 长上下文与极致的推理体验！所有的对话记录和系统提示词设置都会保存在他们各自浏览器的本地数据库中，互不干扰。
 
 ## 开发与测试
 
