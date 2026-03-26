@@ -912,8 +912,8 @@
                 @input="adjustTextareaHeight"
                 placeholder="输入提示词... (Enter 发送, Shift+Enter 换行)"
                 class="w-full border border-gray-300 rounded-xl px-4 py-3 md:py-4 pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base resize-none shadow-sm custom-scrollbar transition-all duration-200"
-                :style="textareaStyle"
                 rows="1"
+                :style="textareaStyle"
               ></textarea>
               <!-- Expand Button (only show if height exceeds 3 lines) -->
               <button
@@ -2004,7 +2004,7 @@
             const textarea = document.querySelector('textarea');
             if (textarea) {
               // Temporarily reset height to get true scrollHeight
-              textareaStyle.height = 'auto';
+              textarea.style.height = 'auto';
 
               nextTick(() => {
                 const scrollHeight = textarea.scrollHeight;
@@ -2015,19 +2015,19 @@
 
                 if (isTextareaExpanded.value) {
                   if (scrollHeight <= 550) {
-                    textareaStyle.height = scrollHeight + 'px';
-                    textareaStyle.overflowY = 'hidden';
+                    textarea.style.height = scrollHeight + 'px';
+                    textarea.style.overflowY = 'hidden';
                   } else {
-                    textareaStyle.height = '550px';
-                    textareaStyle.overflowY = 'auto';
+                    textarea.style.height = '550px';
+                    textarea.style.overflowY = 'auto';
                   }
                 } else {
                   if (scrollHeight <= 192) {
-                    textareaStyle.height = scrollHeight + 'px';
-                    textareaStyle.overflowY = 'hidden';
+                    textarea.style.height = scrollHeight + 'px';
+                    textarea.style.overflowY = 'hidden';
                   } else {
-                    textareaStyle.height = '192px';
-                    textareaStyle.overflowY = 'auto';
+                    textarea.style.height = '192px';
+                    textarea.style.overflowY = 'auto';
                   }
                 }
               });
@@ -2112,6 +2112,10 @@
             systemPromptTemplates,
             applySystemPromptTemplate,
             selectedTemplate,
+            textareaStyle,
+            showExpandButton,
+            isTextareaExpanded,
+            toggleTextareaExpand,
             multiTurn,
             sessions,
             currentSessionId,
