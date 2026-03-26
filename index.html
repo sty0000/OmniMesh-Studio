@@ -778,11 +778,34 @@
                 v-model="inputPrompt"
                 @keydown.enter.exact.prevent="sendMessage"
                 placeholder="输入提示词... (Enter 发送, Shift+Enter 换行)"
-                class="w-full border border-gray-300 rounded-xl px-4 py-3 md:py-4 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base resize-none overflow-y-auto max-h-48 min-h-[56px] shadow-sm"
+                class="w-full border border-gray-300 rounded-xl px-4 py-3 md:py-4 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base resize-none overflow-hidden max-h-48 min-h-[56px] shadow-sm"
                 :disabled="isGenerating"
                 rows="1"
               ></textarea>
             </div>
+
+            <!-- Voice Input Button -->
+            <button
+              type="button"
+              @click="toggleVoiceInput"
+              class="p-3 md:p-4 rounded-xl transition-colors border border-transparent flex-shrink-0"
+              :class="isRecording ? 'text-red-500 bg-red-50 hover:bg-red-100 animate-pulse' : 'text-gray-500 hover:text-blue-600 hover:bg-blue-50 hover:border-blue-100'"
+              :title="isRecording ? '停止录音' : '语音输入'"
+            >
+              <svg
+                class="w-6 h-6 md:w-7 md:h-7"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                ></path>
+              </svg>
+            </button>
 
             <button
               type="submit"
@@ -929,6 +952,46 @@
           // Media upload state
           const pendingMedia = ref([]);
           const mediaError = ref('');
+
+          // Voice Input State
+          const isRecording = ref(false);
+          let mediaRecorder = null;
+          let audioChunks = [];
+
+          const toggleVoiceInput = async () => {
+            if (isRecording.value) {
+              if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+              }
+              isRecording.value = false;
+            } else {
+              try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = (event) => {
+                  if (event.data.size > 0) audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = () => {
+                  const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                  // NOTE: Real STT (Speech-to-Text) requires a backend like Whisper.
+                  // Here we show an alert to inform the user.
+                  alert(
+                    '语音录制完成。\n（注意：将语音转换为文本需要后端的 STT 服务支持，如 Whisper。当前为前端交互演示）',
+                  );
+                  stream.getTracks().forEach((track) => track.stop());
+                };
+
+                mediaRecorder.start();
+                isRecording.value = true;
+              } catch (err) {
+                console.error('麦克风访问错误:', err);
+                alert('无法访问麦克风，请检查浏览器权限。');
+              }
+            }
+          };
 
           // Maximum limits based on standard API constraints (can be adjusted)
           const MAX_IMAGES = 2;
@@ -1407,6 +1470,12 @@
             if (textarea) {
               textarea.style.height = 'auto';
               textarea.style.height = textarea.scrollHeight + 'px';
+              if (textarea.scrollHeight > 192) {
+                // 48rem approx max-h-48
+                textarea.style.overflowY = 'auto';
+              } else {
+                textarea.style.overflowY = 'hidden';
+              }
             }
           };
 
@@ -1502,6 +1571,8 @@
             handleScroll,
             pendingMedia,
             mediaError,
+            isRecording,
+            toggleVoiceInput,
             handleMediaUpload,
             removePendingMedia,
             handleFileUpload,
