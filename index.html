@@ -850,7 +850,7 @@
               type="button"
               @click="$refs.mediaInput.click()"
               class="p-3 md:p-4 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors border border-transparent hover:border-blue-100 flex-shrink-0"
-              title="上传图片或视频"
+              title="上传图片、视频或音频文件"
             >
               <svg
                 class="w-6 h-6 md:w-7 md:h-7"
@@ -870,7 +870,7 @@
               type="file"
               ref="mediaInput"
               @change="handleMediaUpload"
-              accept="image/*,video/*"
+              accept="image/*,video/*,audio/*"
               class="hidden"
               multiple
             />
@@ -1150,6 +1150,7 @@
 
               const isImage = file.type.startsWith('image/');
               const isVideo = file.type.startsWith('video/');
+              const isAudio = file.type.startsWith('audio/');
 
               if (isImage) {
                 if (currentImages >= MAX_IMAGES) {
@@ -1163,6 +1164,8 @@
                   return;
                 }
                 currentVideos++;
+              } else if (isAudio) {
+                // Assuming similar constraints for audio if needed, or unlimited.
               } else {
                 mediaError.value = '不支持的文件格式';
                 return;
@@ -1170,8 +1173,12 @@
 
               const reader = new FileReader();
               reader.onload = (e) => {
+                let mediaType = 'image';
+                if (isVideo) mediaType = 'video';
+                if (isAudio) mediaType = 'audio';
+
                 pendingMedia.value.push({
-                  type: isImage ? 'image' : 'video',
+                  type: mediaType,
                   url: e.target.result,
                   file: file,
                 });
@@ -1490,11 +1497,19 @@
                   });
                 } else if (media.type === 'audio') {
                   // Standard audio payload for multimodal APIs
+                  // Try to determine format from file type or fallback to webm
+                  let format = 'webm';
+                  if (media.file && media.file.type) {
+                    if (media.file.type.includes('mp3')) format = 'mp3';
+                    else if (media.file.type.includes('wav')) format = 'wav';
+                    else if (media.file.type.includes('ogg')) format = 'ogg';
+                  }
+
                   currentContent.push({
                     type: 'input_audio',
                     input_audio: {
                       data: media.url.split(',')[1], // Just the base64 part
-                      format: 'webm',
+                      format: format,
                     },
                   });
                 }
