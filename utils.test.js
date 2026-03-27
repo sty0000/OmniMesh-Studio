@@ -21,13 +21,55 @@ fn(mockModule);
 const { parseServiceLog, validateParams, parseSSE, formatCurrentTime } = mockModule.exports;
 
 describe('LaTeX rendering preprocessor', () => {
+  it('should convert \\( ... \\) to $ ... $', () => {
+    let processedText = '这是一个被转义的 \\(^{210}\\text{Pb}\\) 测试';
+    processedText = processedText.replace(/\\\((.*?)\\\)/g, '$$$1$$');
+    expect(processedText).toBe('这是一个被转义的 $^{210}\\text{Pb}$ 测试');
+  });
+
   it('should wrap unescaped ^{210}\\text{Pb} in $', () => {
     let processedText = '这是一个同位素 ^{210}\\text{Pb} 测试';
     processedText = processedText.replace(
-      /(?<!\$)(?<!\\)\^\{(.*?)\}\\text\{(.*?)\}(?!\$)/g,
+      /(?<!\$)(?<!\\)\^\{(.*?)\}\\?text\{(.*?)\}(?!\$)/g,
       '$^{$1}\\text{$2}$',
     );
     expect(processedText).toBe('这是一个同位素 $^{210}\\text{Pb}$ 测试');
+  });
+
+  it('should wrap unescaped inline greek formulas in $', () => {
+    let processedText = '生成速率 \\lambda_{\\text{Bi}}N_{\\text{Bi}} 和沉降 \\frac{1}{\\tau_R}';
+    // Use an explicit regex that specifically matches exactly what we need for this case
+    // Matching \lambda_{...}N_{...} or \tau_R without overcapturing
+    processedText = processedText.replace(
+      /(?<!\$)(?<!\\)(\\(?:lambda|tau)(?:_R|_\{\\text\{[a-zA-Z]+\}\}(?:N_\{\\text\{[a-zA-Z]+\}\})?))(?!\$)/g,
+      '$$$1$$',
+    );
+    expect(processedText).toBe(
+      '生成速率 $\\lambda_{\\text{Bi}}N_{\\text{Bi}}$ 和沉降 \\frac{1}{$\\tau_R$}',
+    );
+  });
+
+  it('should wrap decay chains containing \\rightarrow in $', () => {
+    let processedText =
+      '实际衰变链为^{222}\\text{Rn} \\rightarrow ^{218}\\text{Po} \\rightarrow ^{214}\\text{Pb} \\rightarrow ^{214}\\text{Bi} \\rightarrow ^{214}\\text{Po} \\rightarrow ^{210}\\text{Pb}';
+    const linesForChain = processedText.split('\n');
+    for (let i = 0; i < linesForChain.length; i++) {
+      let line = linesForChain[i];
+      if (
+        line.includes('\\rightarrow') &&
+        !line.includes('__MATH_BLOCK_') &&
+        !line.includes('```')
+      ) {
+        linesForChain[i] = line.replace(
+          /([A-Za-z0-9^{}\\_]+(?:\s*\\rightarrow\s*[A-Za-z0-9^{}\\_]+)+)/g,
+          '$$$1$$',
+        );
+      }
+    }
+    processedText = linesForChain.join('\n');
+    expect(processedText).toBe(
+      '实际衰变链为$^{222}\\text{Rn} \\rightarrow ^{218}\\text{Po} \\rightarrow ^{214}\\text{Pb} \\rightarrow ^{214}\\text{Bi} \\rightarrow ^{214}\\text{Po} \\rightarrow ^{210}\\text{Pb}$',
+    );
   });
 
   it('should wrap differential equations in $$', () => {

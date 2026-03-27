@@ -1734,13 +1734,18 @@
               processedText = processedText.replace(/<think>/g, '').replace(/<\/think>/g, '');
             }
 
+            // Handle escaped parentheses \( ... \) which some models output instead of $ ... $
+            // We convert them to standard $ ... $ for KaTeX to process properly within Markdown
+            // Do this before protecting math blocks
+            processedText = processedText.replace(/\\\((.*?)\\\)/g, '$$$1$$');
+
             // First, protect already wrapped math to avoid double wrapping.
             // We use temporary placeholders for $...$ and $$...$$
             const mathBlocks = [];
             let placeholderIndex = 0;
 
             processedText = processedText.replace(
-              /(\$\$[\s\S]*?\$\$|\$[\s\S]*?\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\) )/g,
+              /(\$\$[\s\S]*?\$\$|\$[\s\S]*?\$|\\\[[\s\S]*?\\\])/g,
               (match) => {
                 mathBlocks.push(match);
                 return `__MATH_BLOCK_${placeholderIndex++}__`;
@@ -1749,11 +1754,18 @@
 
             // Preprocess some unescaped LaTeX that Qwen might output without proper $ signs.
             // For example, if it outputs ^{210}\text{Pb} without math delimiters, we try to wrap it.
-            // A simple regex to catch common math syntax not wrapped in $ or $$
-            // This is a heuristic and might need tuning based on specific model outputs.
+            // Ensure we don't double wrap if it's already inside a math block placeholder
+            // Note: Some models output \text without escaping, so we also check for \\?text
             processedText = processedText.replace(
-              /(?<!\$)(?<!\\)\^\{(.*?)\}\\text\{(.*?)\}(?!\$)/g,
+              /(?<!\$)(?<!\\)\^\{(.*?)\}\\?text\{(.*?)\}(?!\$)/g,
               '$^{$1}\\text{$2}$',
+            );
+
+            // 2. Fix for common inline unescaped formulas like \lambda_{\text{Bi}}N_{\text{Bi}} or \tau_R
+            // This regex tries to find common Greek letters and subscripts that are floating outside of math blocks
+            processedText = processedText.replace(
+              /(?<!\$)(?<!\\)(\\(?:lambda|tau)(?:_R|_\{\\text\{[a-zA-Z]+\}\}(?:N_\{\\text\{[a-zA-Z]+\}\})?))(?!\$)/g,
+              '$$$1$$',
             );
 
             // 2. Heuristic for standalone equations starting with \frac, \sum, \int, \lambda, etc.
@@ -1770,13 +1782,34 @@
                   line.includes('\\lambda') ||
                   line.includes('\\sum') ||
                   line.includes('\\int')) &&
-                (line.includes('=') || line.includes('_') || line.includes('^'))
+                (line.includes('=') || line.includes('_') || line.includes('^')) &&
+                !line.includes('```') // Ensure we don't accidentally wrap code blocks
               ) {
                 // Wrap the entire line in block math
                 lines[i] = `$$ ${line.trim()} $$`;
               }
             }
             processedText = lines.join('\n');
+
+            // 3. Fix for decay chains (e.g. ^{222}\text{Rn} \rightarrow ^{214}\text{Bi})
+            // If a line contains \rightarrow and looks like a chemical/decay chain without block delimiters
+            const linesForChain = processedText.split('\n');
+            for (let i = 0; i < linesForChain.length; i++) {
+              let line = linesForChain[i];
+              if (
+                line.includes('\\rightarrow') &&
+                !line.includes('__MATH_BLOCK_') &&
+                !line.includes('```')
+              ) {
+                // Extract the core chain if it's mixed with text (e.g. " - **关键步骤**： ^{222}\text{Rn} \rightarrow ...")
+                // Let's wrap any contiguous block containing \rightarrow that isn't already wrapped.
+                linesForChain[i] = line.replace(
+                  /([A-Za-z0-9^{}\\_]+(?:\s*\\rightarrow\s*[A-Za-z0-9^{}\\_]+)+)/g,
+                  '$$$1$$',
+                );
+              }
+            }
+            processedText = linesForChain.join('\n');
 
             // Restore the protected math blocks
             for (let i = 0; i < placeholderIndex; i++) {
