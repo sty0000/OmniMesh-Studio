@@ -1734,6 +1734,19 @@
               processedText = processedText.replace(/<think>/g, '').replace(/<\/think>/g, '');
             }
 
+            // First, protect already wrapped math to avoid double wrapping.
+            // We use temporary placeholders for $...$ and $$...$$
+            const mathBlocks = [];
+            let placeholderIndex = 0;
+
+            processedText = processedText.replace(
+              /(\$\$[\s\S]*?\$\$|\$[\s\S]*?\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\) )/g,
+              (match) => {
+                mathBlocks.push(match);
+                return `__MATH_BLOCK_${placeholderIndex++}__`;
+              },
+            );
+
             // Preprocess some unescaped LaTeX that Qwen might output without proper $ signs.
             // For example, if it outputs ^{210}\text{Pb} without math delimiters, we try to wrap it.
             // A simple regex to catch common math syntax not wrapped in $ or $$
@@ -1742,6 +1755,33 @@
               /(?<!\$)(?<!\\)\^\{(.*?)\}\\text\{(.*?)\}(?!\$)/g,
               '$^{$1}\\text{$2}$',
             );
+
+            // 2. Heuristic for standalone equations starting with \frac, \sum, \int, \lambda, etc.
+            // This regex tries to find blocks of text that look heavily like LaTeX math but aren't wrapped.
+            // A more specific targeted fix for the user's reported differential equation and similar raw LaTeX lines
+            // If a line contains \frac, \lambda, \text, =, _, ^ and NO regular words (or very few), it's probably an equation.
+            const lines = processedText.split('\n');
+            for (let i = 0; i < lines.length; i++) {
+              let line = lines[i];
+              // Check if line contains strong LaTeX indicators but no placeholders
+              if (
+                !line.includes('__MATH_BLOCK_') &&
+                (line.includes('\\frac') ||
+                  line.includes('\\lambda') ||
+                  line.includes('\\sum') ||
+                  line.includes('\\int')) &&
+                (line.includes('=') || line.includes('_') || line.includes('^'))
+              ) {
+                // Wrap the entire line in block math
+                lines[i] = `$$ ${line.trim()} $$`;
+              }
+            }
+            processedText = lines.join('\n');
+
+            // Restore the protected math blocks
+            for (let i = 0; i < placeholderIndex; i++) {
+              processedText = processedText.replace(`__MATH_BLOCK_${i}__`, mathBlocks[i]);
+            }
 
             // Convert markdown to HTML
             let html = marked.parse(processedText);

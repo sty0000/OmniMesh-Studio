@@ -20,6 +20,42 @@ fn(mockModule);
 
 const { parseServiceLog, validateParams, parseSSE, formatCurrentTime } = mockModule.exports;
 
+describe('LaTeX rendering preprocessor', () => {
+  it('should wrap unescaped ^{210}\\text{Pb} in $', () => {
+    let processedText = '这是一个同位素 ^{210}\\text{Pb} 测试';
+    processedText = processedText.replace(
+      /(?<!\$)(?<!\\)\^\{(.*?)\}\\text\{(.*?)\}(?!\$)/g,
+      '$^{$1}\\text{$2}$',
+    );
+    expect(processedText).toBe('这是一个同位素 $^{210}\\text{Pb}$ 测试');
+  });
+
+  it('should wrap differential equations in $$', () => {
+    let processedText =
+      '\\frac{dN_{\\text{Pb}}}{dt} = \\lambda_{\\text{Bi}}N_{\\text{Bi}} - \\lambda_{\\text{Pb}}N_{\\text{Pb}} - \\frac{1}{\\tau_R}N_{\\text{Pb}}';
+
+    const lines = processedText.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      let line = lines[i];
+      if (
+        !line.includes('__MATH_BLOCK_') &&
+        (line.includes('\\frac') ||
+          line.includes('\\lambda') ||
+          line.includes('\\sum') ||
+          line.includes('\\int')) &&
+        (line.includes('=') || line.includes('_') || line.includes('^'))
+      ) {
+        lines[i] = `$$ ${line.trim()} $$`;
+      }
+    }
+    processedText = lines.join('\n');
+
+    expect(processedText).toBe(
+      '$$ \\frac{dN_{\\text{Pb}}}{dt} = \\lambda_{\\text{Bi}}N_{\\text{Bi}} - \\lambda_{\\text{Pb}}N_{\\text{Pb}} - \\frac{1}{\\tau_R}N_{\\text{Pb}} $$',
+    );
+  });
+});
+
 describe('formatCurrentTime', () => {
   it('should format date correctly', () => {
     // Note: JS Date month is 0-indexed
