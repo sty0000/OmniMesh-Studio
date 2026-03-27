@@ -666,7 +666,7 @@
               >
                 <!-- The Bubble -->
                 <div
-                  class="rounded-xl md:rounded-2xl p-4 md:p-6 shadow-sm w-full text-base"
+                  class="rounded-xl md:rounded-2xl p-4 md:p-6 shadow-sm w-full text-base overflow-x-auto"
                   :class="msg.role === 'user' ? 'bg-blue-100 text-blue-900' : 'bg-white border border-gray-200'"
                 >
                   <div
@@ -1731,14 +1731,17 @@
             const thinkMatch = processedText.match(/<think>([\s\S]*?)(?:<\/think>|$)/);
             if (thinkMatch) {
               // If we found a think tag in the regular content, we should strip it
-              // because it's already handled by our separate thinking logic,
-              // or if it wasn't, we just remove the tags so it displays cleanly.
-              // For Qwen, if it outputs <think> directly into content, we remove the tags
-              // and let the user see it, or strip it entirely if we moved it to msg.thinking.
-              // Here, we just remove the literal <think> and </think> tags to avoid HTML rendering issues
-              // if it leaked into the main content.
               processedText = processedText.replace(/<think>/g, '').replace(/<\/think>/g, '');
             }
+
+            // Preprocess some unescaped LaTeX that Qwen might output without proper $ signs.
+            // For example, if it outputs ^{210}\text{Pb} without math delimiters, we try to wrap it.
+            // A simple regex to catch common math syntax not wrapped in $ or $$
+            // This is a heuristic and might need tuning based on specific model outputs.
+            processedText = processedText.replace(
+              /(?<!\$)(?<!\\)\^\{(.*?)\}\\text\{(.*?)\}(?!\$)/g,
+              '$^{$1}\\text{$2}$',
+            );
 
             // Convert markdown to HTML
             let html = marked.parse(processedText);
@@ -1752,6 +1755,8 @@
                 { left: '\\(', right: '\\)', display: false },
               ],
               throwOnError: false,
+              trust: true, // Allow \text and other potentially unsafe commands
+              strict: false, // Less strict about LaTeX syntax errors
             };
 
             // Create a temporary DOM element to render math
@@ -2093,6 +2098,9 @@
           const adjustTextareaHeight = () => {
             const textarea = document.querySelector('textarea');
             if (textarea) {
+              // Get current text lines
+              const lineCount = (inputPrompt.value.match(/\n/g) || []).length + 1;
+
               // Temporarily reset height to get true scrollHeight
               textarea.style.height = 'auto';
 
@@ -2106,18 +2114,18 @@
                 if (isTextareaExpanded.value) {
                   if (scrollHeight <= 550) {
                     textarea.style.height = scrollHeight + 'px';
-                    textarea.style.overflowY = 'hidden';
+                    textareaStyle.overflowY = 'hidden';
                   } else {
                     textarea.style.height = '550px';
-                    textarea.style.overflowY = 'auto';
+                    textareaStyle.overflowY = 'auto';
                   }
                 } else {
                   if (scrollHeight <= 192) {
                     textarea.style.height = scrollHeight + 'px';
-                    textarea.style.overflowY = 'hidden';
+                    textareaStyle.overflowY = 'hidden';
                   } else {
                     textarea.style.height = '192px';
-                    textarea.style.overflowY = 'auto';
+                    textareaStyle.overflowY = 'auto';
                   }
                 }
               });
@@ -2176,11 +2184,29 @@
             }
 
             try {
-              await navigator.clipboard.writeText(textToCopy);
-              msg.copied = true;
-              setTimeout(() => {
-                msg.copied = false;
-              }, 2000);
+              // Create a temporary textarea to handle formatting properly
+              const textArea = document.createElement('textarea');
+              textArea.value = textToCopy;
+              // Avoid scrolling to bottom
+              textArea.style.top = '0';
+              textArea.style.left = '0';
+              textArea.style.position = 'fixed';
+
+              document.body.appendChild(textArea);
+              textArea.focus();
+              textArea.select();
+
+              try {
+                document.execCommand('copy');
+                msg.copied = true;
+                setTimeout(() => {
+                  msg.copied = false;
+                }, 2000);
+              } catch (err) {
+                console.error('Fallback: Oops, unable to copy', err);
+              }
+
+              document.body.removeChild(textArea);
             } catch (err) {
               console.error('Failed to copy text: ', err);
             }
