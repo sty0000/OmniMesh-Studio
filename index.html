@@ -249,9 +249,14 @@
           <div>
             <h1 class="text-xl font-bold flex items-center gap-2">
               Qwen vLLM 推理客户端
-              <span class="text-xs bg-blue-800 px-2 py-1 rounded-full"
-                >{{ config.model || '未加载模型' }}</span
+              <span
+                class="text-xs px-2 py-1 rounded-full transition-colors duration-300 text-white"
+                :class="isConnected ? 'bg-blue-800' : 'bg-red-500 animate-pulse'"
+                :title="isConnected ? '连接正常' : '连接断开，正在自动重连...'"
               >
+                {{ config.model || '未加载模型' }}
+                <span v-if="!isConnected" class="ml-1 text-[10px] opacity-80">(离线)</span>
+              </span>
             </h1>
             <p class="text-xs text-blue-200 mt-1">
               API: {{ config.apiBase }} | Max Context: {{ config.maxModelLen }}
@@ -1029,6 +1034,20 @@
             apiKey: '',
           });
 
+          // Initialize apiBase automatically based on the URL the user used to access the page
+          const autoConfigureAPI = () => {
+            const currentHost = window.location.hostname;
+            // If accessing via file:// protocol, fallback to localhost
+            if (!currentHost || currentHost === '') {
+              config.apiBase = 'http://localhost:8000/v1';
+            } else {
+              // Assume the vLLM API is running on the same server IP but on port 8000
+              config.apiBase = `http://${currentHost}:8000/v1`;
+            }
+          };
+          // Run immediately
+          autoConfigureAPI();
+
           const params = reactive({
             temperature: 0.7,
             top_p: 0.9,
@@ -1468,14 +1487,14 @@
             // Note: the `rawHtml` from original renderer is a <pre><code>...</code></pre> block.
             // We inject our header inside the <pre> before the <code>.
             const headerHtml = `
-                <div class="code-header">
-                    <span>${langLabel}</span>
-                    <button class="code-copy-btn" onclick="copyCodeBlock(this)">
-                        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
-                        <span>复制</span>
-                    </button>
-                </div>
-            `;
+                    <div class="code-header">
+                        <span>${langLabel}</span>
+                        <button class="code-copy-btn" onclick="copyCodeBlock(this)">
+                            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                            <span>复制</span>
+                        </button>
+                    </div>
+                `;
 
             // Simple replace to inject our header right after <pre>
             return rawHtml.replace(/^<pre>/i, `<pre>${headerHtml}`);
@@ -1600,42 +1619,63 @@
           const applyConfig = (logText) => {
             const parsed = parseServiceLog(logText);
             Object.assign(config, parsed);
+            // Auto-override the API base to match the current host if accessed over network
+            autoConfigureAPI();
             // Also clamp max_tokens if needed
             params.max_tokens = Math.min(params.max_tokens, config.maxModelLen);
             initialized.value = true;
           };
 
           const fetchLogAutomatically = async () => {
+            // Connection latency tracking
+            const startTime = performance.now();
+            let connectionSuccess = false;
+
             try {
-              // 尝试读取日志文件
+              // First, try to read the local log file if available (useful for local dev)
               const res = await fetch('./service_start_log.txt');
               if (res.ok) {
                 const text = await res.text();
                 applyConfig(text);
-                return; // 成功解析则返回
+                connectionSuccess = true;
               }
             } catch (err) {
               console.warn('Cannot fetch log automatically, fallback to direct API query.');
             }
 
-            // 如果读取日志失败，直接尝试向 API 获取模型信息
-            try {
-              const apiRes = await fetch(`${config.apiBase}/models`);
-              if (apiRes.ok) {
-                const data = await apiRes.json();
-                if (data && data.data && data.data.length > 0) {
-                  const modelInfo = data.data[0];
-                  config.model = modelInfo.id || 'qwen';
-                  if (modelInfo.max_model_len) {
-                    config.maxModelLen = modelInfo.max_model_len;
-                    params.max_tokens = Math.min(params.max_tokens, config.maxModelLen);
+            // If we couldn't get the log (e.g. standard network deployment), try to ping the API directly
+            if (!connectionSuccess) {
+              try {
+                // Ensure apiBase is set correctly before pinging
+                autoConfigureAPI();
+                const apiRes = await fetch(`${config.apiBase}/models`);
+                if (apiRes.ok) {
+                  const data = await apiRes.json();
+                  if (data && data.data && data.data.length > 0) {
+                    const modelInfo = data.data[0];
+                    config.model = modelInfo.id || 'qwen';
+                    if (modelInfo.max_model_len) {
+                      config.maxModelLen = modelInfo.max_model_len;
+                      params.max_tokens = Math.min(params.max_tokens, config.maxModelLen);
+                    }
+                    initialized.value = true;
+                    connectionSuccess = true;
                   }
-                  initialized.value = true;
-                  return;
                 }
+              } catch (apiErr) {
+                console.warn('Failed to fetch model info from API directly:', apiErr);
               }
-            } catch (apiErr) {
-              console.warn('Failed to fetch model info from API directly:', apiErr);
+            }
+
+            const endTime = performance.now();
+            console.log(
+              `[Metrics] Init connection time: ${(endTime - startTime).toFixed(2)}ms. Success: ${connectionSuccess}`,
+            );
+
+            // If all automated methods fail, we still mark as initialized to let user see the UI
+            // and auto-reconnect logic will take over if needed.
+            if (!connectionSuccess) {
+              initialized.value = true;
             }
           };
 
@@ -1822,6 +1862,9 @@
             };
           };
 
+          const isConnected = ref(true);
+          let reconnectInterval = null;
+
           const performRequest = async (promptStr, mediaItems = [], msgIndexToRetry = null) => {
             if (isGenerating.value) return;
 
@@ -1885,6 +1928,12 @@
                 body: JSON.stringify(payload),
                 signal: abortController.signal,
               });
+
+              isConnected.value = true; // Connection successful
+              if (reconnectInterval) {
+                clearInterval(reconnectInterval);
+                reconnectInterval = null;
+              }
 
               if (!response.ok) {
                 let errStr = `HTTP ${response.status}`;
@@ -1977,6 +2026,16 @@
               } else {
                 console.error(err);
                 messages.value[targetIndex].error = err.message || '请求超时或网络异常';
+
+                // Handle connection failure and start auto-reconnect
+                if (
+                  err.message.includes('fetch') ||
+                  err.message.includes('网络') ||
+                  err.message.includes('timeout')
+                ) {
+                  isConnected.value = false;
+                  startAutoReconnect();
+                }
               }
             } finally {
               // Always ensure thinking state is cleared when generation ends (normally, errored, or aborted)
@@ -1988,6 +2047,27 @@
               abortController = null;
               scrollToBottom();
             }
+          };
+
+          const startAutoReconnect = () => {
+            if (reconnectInterval) return;
+
+            console.log('[Network] Connection lost. Attempting auto-reconnect every 5s...');
+            reconnectInterval = setInterval(async () => {
+              try {
+                const apiRes = await fetch(`${config.apiBase}/models`, {
+                  signal: AbortSignal.timeout(3000),
+                });
+                if (apiRes.ok) {
+                  console.log('[Network] Reconnected successfully!');
+                  isConnected.value = true;
+                  clearInterval(reconnectInterval);
+                  reconnectInterval = null;
+                }
+              } catch (e) {
+                // Still offline
+              }
+            }, 5000);
           };
 
           const showExpandButton = computed(() => {
@@ -2146,6 +2226,7 @@
             handleScroll,
             pendingMedia,
             mediaError,
+            isConnected,
             isRecording,
             toggleVoiceInput,
             handleMediaUpload,
