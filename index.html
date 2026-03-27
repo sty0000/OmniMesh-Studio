@@ -461,6 +461,16 @@
           <div
             class="flex gap-4 items-center justify-between bg-gray-50 p-2 rounded-lg mb-2 border"
           >
+            <span class="text-sm font-medium text-gray-700">API 地址</span>
+            <input
+              type="text"
+              v-model="config.apiBase"
+              class="border border-gray-300 rounded px-2 py-1 text-xs w-40 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+          <div
+            class="flex gap-4 items-center justify-between bg-gray-50 p-2 rounded-lg mb-2 border"
+          >
             <span class="text-sm font-medium text-gray-700">多轮对话</span>
             <label class="flex items-center cursor-pointer">
               <div class="relative">
@@ -905,7 +915,7 @@
               multiple
             />
 
-            <div class="flex-1 relative flex items-end">
+            <div class="flex-1 relative flex items-start">
               <textarea
                 v-model="inputPrompt"
                 @keydown.enter.exact.prevent="!isGenerating && sendMessage()"
@@ -920,7 +930,7 @@
                 v-if="showExpandButton"
                 @click="toggleTextareaExpand"
                 type="button"
-                class="absolute right-2 top-2 p-1.5 bg-gray-100 hover:bg-gray-200 text-gray-500 rounded-md transition-colors"
+                class="absolute right-2 top-2 p-1.5 bg-white hover:bg-gray-100 text-gray-500 rounded-md transition-colors shadow-sm border border-gray-200"
                 :title="isTextareaExpanded ? '收起输入框' : '展开输入框'"
               >
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1013,7 +1023,7 @@
           const initialized = ref(false);
           const initError = ref('');
           const config = reactive({
-            apiBase: 'http://localhost:8000/v1',
+            apiBase: '', // Will be auto-determined based on current hostname
             model: 'qwen',
             maxModelLen: 8192,
             apiKey: '',
