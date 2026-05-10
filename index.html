@@ -653,6 +653,10 @@
                 class="border border-gray-300 rounded px-2 py-1 text-xs w-40 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
+
+            <p class="text-[10px] text-gray-500 px-1">
+              调试：Max Context = {{ config.maxModelLen }}（来源：{{ maxModelLenSourceLabel }}）
+            </p>
           </div>
 
           <button
@@ -1116,6 +1120,12 @@
             model: 'qwen',
             maxModelLen: 65536,
             apiKey: '',
+          });
+          const maxModelLenSource = ref('default');
+          const maxModelLenSourceLabel = computed(() => {
+            if (maxModelLenSource.value === 'log') return '日志解析';
+            if (maxModelLenSource.value === 'api') return 'API /v1/models';
+            return '默认值';
           });
 
           // Initialize apiBase automatically based on the URL the user used to access the page
@@ -2277,6 +2287,12 @@
           const applyConfig = (logText) => {
             const parsed = parseServiceLog(logText);
             Object.assign(config, parsed);
+            const hasMaxModelLenInLog = /(?:--max-model-len\s+|max_model_len\s*[=:]?\s*)(\d+)/i.test(
+              logText,
+            );
+            if (hasMaxModelLenInLog) {
+              maxModelLenSource.value = 'log';
+            }
             // Auto-override the API base to match the current host if accessed over network
             autoConfigureAPI();
             // Also clamp max_tokens if needed (session-aware)
@@ -2316,6 +2332,7 @@
                     config.model = modelInfo.id || 'qwen';
                     if (modelInfo.max_model_len) {
                       config.maxModelLen = modelInfo.max_model_len;
+                      maxModelLenSource.value = 'api';
                       normalizeAllSessionsInferenceState();
                       syncParamsFromSession(currentSession.value);
                       persistCurrentSessionParams();
@@ -2355,6 +2372,7 @@
           };
 
           const useDefaultConfig = () => {
+            maxModelLenSource.value = 'default';
             initialized.value = true;
           };
 
@@ -3297,6 +3315,7 @@
             initialized,
             initError,
             config,
+            maxModelLenSourceLabel,
             params,
             activePreset,
             applyPreset,
