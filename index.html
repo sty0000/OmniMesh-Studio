@@ -1980,15 +1980,26 @@
               processedText = processedText.replace(/\\\((.*?)\\\)/g, '$$$1$$');
             }
 
+            processedText = processedText.replace(
+              /(^|[^$\\])([a-zA-Z](?:\\!)+\/)(?!\$)/g,
+              '$1$$$2$$',
+            );
+
+            processedText = processedText.replace(
+              /(^|[^$\\])(\\slashed\{[^{}\n]+\})(?!\$)/g,
+              '$1$$$2$$',
+            );
+
             const mathBlocks = [];
             let placeholderIndex = 0;
+            const mathPlaceholderPrefix = '@@MATH_BLOCK_';
 
             if (processedText.includes('$') || processedText.includes('\\[')) {
               processedText = processedText.replace(
                 /(\$\$[\s\S]*?\$\$|\$[^\n$]+\$|\\\[[\s\S]*?\\\])/g,
                 (match) => {
                   mathBlocks.push(match);
-                  return `__MATH_BLOCK_${placeholderIndex++}__`;
+                  return `${mathPlaceholderPrefix}${placeholderIndex++}@@`;
                 },
               );
             }
@@ -2016,7 +2027,7 @@
 
               if (!inCodeFence) {
                 if (
-                  !line.includes('__MATH_BLOCK_') &&
+                  !line.includes('@@MATH_BLOCK_') &&
                   (line.includes('\\frac') ||
                     line.includes('\\lambda') ||
                     line.includes('\\sum') ||
@@ -2041,7 +2052,7 @@
               const lineFenceOpen = isFenceOpen(line);
 
               if (!inCodeFence) {
-                if (line.includes('\\rightarrow') && !line.includes('__MATH_BLOCK_') && !line.includes('```')) {
+                if (line.includes('\\rightarrow') && !line.includes('@@MATH_BLOCK_') && !line.includes('```')) {
                   linesForChain[i] = line.replace(
                     /([A-Za-z0-9^{}\\_]+(?:\s*\\rightarrow\s*[A-Za-z0-9^{}\\_]+)+)/g,
                     '$$$1$$',
@@ -2055,14 +2066,13 @@
             }
             processedText = linesForChain.join('\n');
 
-            for (let i = 0; i < placeholderIndex; i++) {
-              processedText = processedText.replace(`__MATH_BLOCK_${i}__`, mathBlocks[i]);
-            }
-
-            return processedText;
+            return { processedText, mathBlocks };
           };
 
           const katexOptions = {
+            macros: {
+              '\\slashed': '\\rlap{#1}/',
+            },
             delimiters: [
               { left: '$$', right: '$$', display: true },
               { left: '\\[', right: '\\]', display: true },
@@ -2075,7 +2085,13 @@
           };
 
           const renderMarkdownSegment = (text) => {
-            const html = marked.parse(preprocessMarkdownText(text));
+            const { processedText, mathBlocks } = preprocessMarkdownText(text);
+            let html = marked.parse(processedText);
+
+            for (let i = 0; i < mathBlocks.length; i++) {
+              html = html.replace(`@@MATH_BLOCK_${i}@@`, mathBlocks[i]);
+            }
+
             const tempDiv = document.createElement('div');
             tempDiv.innerHTML = html;
 
