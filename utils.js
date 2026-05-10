@@ -13,7 +13,7 @@ function parseServiceLog(logText) {
 
   // Extract model name
   // Prefer --served-model-name if it exists, otherwise fallback to --model
-  const servedModelMatch = logText.match(/(?:--served-model-name\s+)([\w./-]+)/i);
+  const servedModelMatch = logText.match(/(?:--served-model-name\s+|'served_model_name':\s*\[')([\w./-]+)/i);
   if (servedModelMatch && servedModelMatch[1]) {
     config.model = servedModelMatch[1].replace(/['"]/g, '');
   } else {

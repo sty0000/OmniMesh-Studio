@@ -1,6 +1,17 @@
 <!doctype html>
 <html lang="zh-CN">
   <head>
+    <script>
+      // 为不支持 .at() 的环境提供补丁
+      if (!Array.prototype.at) {
+        Array.prototype.at = function(n) {
+          n = Math.trunc(n) || 0;
+          if (n < 0) n += this.length;
+          if (n < 0 || n >= this.length) return undefined;
+          return this[n];
+        };
+      }
+    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Qwen vLLM Web UI</title>
@@ -204,7 +215,7 @@
           <h2 class="text-2xl font-bold mb-4">初始化服务配置</h2>
           <p class="text-sm text-gray-600 mb-4">
             无法自动读取
-            <code class="bg-gray-100 px-1 rounded">service_start_log.txt</code
+            <code class="bg-gray-100 px-1 rounded">vllm_server.log</code
             >。请手动选择该文件，或确保已通过本地服务器访问并存放于同目录。
           </p>
 
@@ -1633,7 +1644,7 @@
 
             try {
               // First, try to read the local log file if available (useful for local dev)
-              const res = await fetch('./service_start_log.txt');
+              const res = await fetch('./vllm_server.log');
               if (res.ok) {
                 const text = await res.text();
                 applyConfig(text);
