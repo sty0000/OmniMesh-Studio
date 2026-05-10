@@ -38,6 +38,10 @@
         background-color: #f3f4f6;
       }
 
+      #chat-container {
+        overflow-anchor: auto;
+      }
+
       .message-content pre {
         background: #1e1e1e;
         color: #d4d4d4;
@@ -645,6 +649,7 @@
 
         <!-- Messages List -->
         <div
+          id="chat-container"
           class="flex-1 flex flex-col p-4 md:p-8 overflow-y-auto relative pr-8 md:pr-12 scroll-smooth"
           ref="chatContainer"
           @scroll="handleScroll"
@@ -658,9 +663,9 @@
 
           <div class="max-w-5xl mx-auto w-full">
             <div
-              v-for="(msg, index) in messages"
-              :key="index"
-              :id="'msg-' + index"
+              v-for="(msg, viewIndex) in visibleMessages"
+              :key="visibleStartIndex + viewIndex"
+              :id="'msg-' + (visibleStartIndex + viewIndex)"
               class="mb-6 md:mb-8 flex group"
               :class="msg.role === 'user' ? 'justify-end' : 'justify-start'"
             >
@@ -745,13 +750,23 @@
                       class="think-content px-4 text-sm text-gray-600 border-t border-gray-100"
                       :class="msg.showThinking ? 'expanded py-3' : 'collapsed'"
                     >
-                      <div v-html="renderMarkdown(msg.thinking, `thinking-${index}`)"></div>
+                      <div
+                        v-html="
+                          msg.renderCacheVersion === RENDER_CACHE_VERSION && msg.thinkingRenderedHtml
+                            ? msg.thinkingRenderedHtml
+                            : renderMarkdown(msg.thinking, `thinking-${visibleStartIndex + viewIndex}`)
+                        "
+                      ></div>
                     </div>
                   </div>
 
                   <div
                     class="message-content text-base md:text-[1.05rem] leading-relaxed break-words"
-                    v-html="renderMarkdown(msg.content, `content-${index}`)"
+                    v-html="
+                      msg.renderCacheVersion === RENDER_CACHE_VERSION && msg.renderedHtml
+                        ? msg.renderedHtml
+                        : renderMarkdown(msg.content, `content-${visibleStartIndex + viewIndex}`)
+                    "
                   ></div>
 
                   <!-- Error State -->
@@ -760,7 +775,7 @@
                     class="mt-3 text-red-500 text-sm font-semibold flex items-center gap-2"
                   >
                     <span>{{ msg.error }}</span>
-                    <button @click="retryMessage(index)" class="underline hover:text-red-700">
+                    <button @click="retryMessage(visibleStartIndex + viewIndex)" class="underline hover:text-red-700">
                       重试
                     </button>
                   </div>
@@ -957,8 +972,9 @@
               multiple
             />
 
-            <div class="flex-1 relative flex items-start">
+            <div class="flex-1 relative flex items-start min-w-0">
               <textarea
+                ref="composerTextarea"
                 v-model="inputPrompt"
                 @keydown.enter.exact.prevent="!isGenerating && sendMessage()"
                 @input="adjustTextareaHeight"
@@ -1018,12 +1034,13 @@
             </button>
 
             <!-- Send / Stop Button Toggle -->
-            <div class="flex-shrink-0 w-[100px] md:w-[120px] h-[48px] md:h-[56px] relative">
+            <div class="flex-shrink-0 min-w-[112px] md:min-w-[128px] h-[48px] md:h-[56px] relative">
               <button
                 v-if="!isGenerating"
                 type="submit"
-                class="absolute inset-0 w-full h-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-md hover:shadow-lg"
+                class="absolute inset-0 w-full h-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-colors disabled:opacity-45 disabled:cursor-not-allowed disabled:bg-blue-400 disabled:hover:bg-blue-400 flex items-center justify-center gap-2 shadow-md hover:shadow-lg"
                 :disabled="(!inputPrompt.trim() && pendingMedia.length === 0)"
+                :aria-disabled="(!inputPrompt.trim() && pendingMedia.length === 0) ? 'true' : 'false'"
               >
                 <span class="hidden md:inline text-lg">发送</span>
                 <svg
@@ -1121,8 +1138,10 @@
           const inputPrompt = ref('');
           const isGenerating = ref(false);
           const chatContainer = ref(null);
+          const composerTextarea = ref(null);
           const activeMessageIndex = ref(-1);
           const editInputRef = ref(null);
+          let pendingAutoScrollRaf = null;
 
           const STREAM_TICK_MS = 16;
           const STREAM_MIN_CHARS_PER_TICK = 2;
@@ -1318,16 +1337,91 @@
               const store = tx.objectStore('sessions');
               const request = store.get('all_sessions');
 
+              const LARGE_DECOMPRESS_THRESHOLD = 2 * 1024 * 1024;
+
+              const decompressInWorker = (compressedText) => {
+                return new Promise((resolve, reject) => {
+                  if (typeof Worker === 'undefined') {
+                    reject(new Error('Worker not available'));
+                    return;
+                  }
+
+                  const workerCode = `
+                    self.onmessage = function(e) {
+                      try {
+                        const compressed = e.data;
+                        const decompressed = LZString.decompressFromUTF16(compressed);
+                        self.postMessage({ ok: true, data: decompressed });
+                      } catch (err) {
+                        self.postMessage({ ok: false, error: err && err.message ? err.message : String(err) });
+                      }
+                    };
+                  `;
+
+                  const blob = new Blob([workerCode], { type: 'application/javascript' });
+                  const workerUrl = URL.createObjectURL(blob);
+                  const worker = new Worker(workerUrl);
+
+                  worker.onmessage = (event) => {
+                    URL.revokeObjectURL(workerUrl);
+                    worker.terminate();
+                    if (event.data && event.data.ok) {
+                      resolve(event.data.data);
+                    } else {
+                      reject(new Error(event.data?.error || 'Worker decompression failed'));
+                    }
+                  };
+
+                  worker.onerror = (errorEvent) => {
+                    URL.revokeObjectURL(workerUrl);
+                    worker.terminate();
+                    reject(errorEvent.error || new Error(errorEvent.message || 'Worker runtime error'));
+                  };
+
+                  worker.postMessage(compressedText);
+                });
+              };
+
               return new Promise((resolve) => {
                 request.onsuccess = () => {
                   if (request.result && request.result.data) {
-                    try {
-                      const decompressed = LZString.decompressFromUTF16(request.result.data);
-                      resolve(JSON.parse(decompressed));
-                    } catch (e) {
-                      console.error('Failed to parse from IndexedDB', e);
-                      resolve(null);
+                    const compressed = request.result.data;
+                    const useWorker =
+                      typeof compressed === 'string' &&
+                      compressed.length * 2 >= LARGE_DECOMPRESS_THRESHOLD;
+
+                    const parseAndResolve = (decompressedText) => {
+                      try {
+                        resolve(JSON.parse(decompressedText));
+                      } catch (e) {
+                        console.error('Failed to parse from IndexedDB', e);
+                        resolve(null);
+                      }
+                    };
+
+                    const fallbackMainThread = () => {
+                      try {
+                        const decompressed = LZString.decompressFromUTF16(compressed);
+                        parseAndResolve(decompressed);
+                      } catch (e) {
+                        console.error('Failed to parse from IndexedDB', e);
+                        resolve(null);
+                      }
+                    };
+
+                    if (!useWorker) {
+                      fallbackMainThread();
+                      return;
                     }
+
+                    decompressInWorker(compressed)
+                      .then((decompressed) => {
+                        parseAndResolve(decompressed);
+                      })
+                      .catch((workerErr) => {
+                        console.warn('Worker decompression failed, fallback to main thread', workerErr);
+                        fallbackMainThread();
+                      });
                   } else {
                     resolve(null);
                   }
@@ -1372,6 +1466,49 @@
           const messages = computed(() => {
             return currentSession.value.messages;
           });
+
+          const WINDOW_SIZE = 20;
+          const WINDOW_EXPAND_STEP = 20;
+          const WINDOW_TOP_EXPAND_THRESHOLD = 120;
+          const visibleStartIndex = ref(0);
+          const isExpandingHistory = ref(false);
+
+          const visibleMessages = computed(() => {
+            return messages.value.slice(visibleStartIndex.value);
+          });
+
+          const resetVisibleWindowToLatest = () => {
+            const total = messages.value.length;
+            visibleStartIndex.value = Math.max(0, total - WINDOW_SIZE);
+          };
+
+          const expandVisibleWindowUpward = async (targetIndex = null) => {
+            if (!chatContainer.value) return;
+            if (visibleStartIndex.value <= 0) return;
+            if (isExpandingHistory.value) return;
+
+            const previousStart = visibleStartIndex.value;
+            const previousScrollHeight = chatContainer.value.scrollHeight;
+            const previousScrollTop = chatContainer.value.scrollTop;
+
+            let nextStart;
+            if (typeof targetIndex === 'number' && targetIndex >= 0) {
+              nextStart = Math.min(previousStart, Math.max(0, targetIndex));
+            } else {
+              nextStart = Math.max(0, previousStart - WINDOW_EXPAND_STEP);
+            }
+
+            if (nextStart === previousStart) return;
+
+            isExpandingHistory.value = true;
+            visibleStartIndex.value = nextStart;
+            await nextTick();
+
+            const nextScrollHeight = chatContainer.value.scrollHeight;
+            const heightDelta = nextScrollHeight - previousScrollHeight;
+            chatContainer.value.scrollTop = previousScrollTop + Math.max(0, heightDelta);
+            isExpandingHistory.value = false;
+          };
 
           const currentSessionSystemPrompt = computed({
             get: () => currentSession.value.systemPrompt || '',
@@ -1476,6 +1613,7 @@
             });
             currentSessionId.value = newId;
             saveLastActiveSessionId(newId);
+            resetVisibleWindowToLatest();
           };
 
           const switchSession = (id) => {
@@ -1483,7 +1621,10 @@
             if (editingSessionId.value === id) return; // Prevent switch logic if editing this session
             currentSessionId.value = id;
             saveLastActiveSessionId(id);
-            scrollToBottom();
+            resetVisibleWindowToLatest();
+            ensureRenderCacheForVisibleMessages();
+            autoScrollEnabled.value = true;
+            scrollToBottom(true);
           };
 
           const startEditSession = (session) => {
@@ -1519,6 +1660,7 @@
               if (currentSessionId.value === id) {
                 currentSessionId.value = sessions.value[Math.max(0, index - 1)].id;
                 saveLastActiveSessionId(currentSessionId.value);
+                resetVisibleWindowToLatest();
               }
 
               // Force an immediate save to database to guarantee deletion persists
@@ -1717,22 +1859,79 @@
 
           let abortController = null;
 
-          const scrollToBottom = async (force = false) => {
+          const scrollToLastMessageAnchor = async (force = false, behavior = 'auto') => {
             await nextTick();
-            if (chatContainer.value) {
-              // Only auto-scroll if autoScrollEnabled is true, OR if we force it (e.g. when user sends a new message)
-              if (autoScrollEnabled.value || force) {
-                chatContainer.value.scrollTop = chatContainer.value.scrollHeight;
-              }
+            if (!chatContainer.value) return;
+
+            if (!force && !autoScrollEnabled.value) {
               updateActiveMessageIndex();
+              return;
             }
+
+            const lastIndex = messages.value.length - 1;
+            if (lastIndex >= 0 && lastIndex < visibleStartIndex.value) {
+              resetVisibleWindowToLatest();
+              await nextTick();
+            }
+
+            const anchorId = messages.value.length > 0 ? `msg-${messages.value.length - 1}` : null;
+            const anchorEl = anchorId ? document.getElementById(anchorId) : null;
+
+            if (anchorEl && chatContainer.value) {
+              const targetTop =
+                anchorEl.offsetTop -
+                chatContainer.value.offsetTop +
+                anchorEl.offsetHeight -
+                chatContainer.value.clientHeight +
+                16;
+
+              chatContainer.value.scrollTo({
+                top: Math.max(0, targetTop),
+                behavior,
+              });
+            } else if (chatContainer.value) {
+              chatContainer.value.scrollTop = chatContainer.value.scrollHeight;
+            }
+
+            updateActiveMessageIndex();
+          };
+
+          const requestAutoScroll = (force = false, behavior = 'auto') => {
+            if (isExpandingHistory.value) {
+              window.setTimeout(() => requestAutoScroll(force, behavior), 16);
+              return;
+            }
+
+            if (pendingAutoScrollRaf !== null) {
+              cancelAnimationFrame(pendingAutoScrollRaf);
+            }
+
+            pendingAutoScrollRaf = requestAnimationFrame(async () => {
+              pendingAutoScrollRaf = null;
+              await scrollToLastMessageAnchor(force, behavior);
+            });
+          };
+
+          const scrollToBottom = (force = false) => {
+            requestAutoScroll(force, 'auto');
           };
 
           const scrollToMessage = (index) => {
+            if (index < visibleStartIndex.value) {
+              expandVisibleWindowUpward(index).then(() => {
+                scrollToMessage(index);
+              });
+              return;
+            }
+
             const el = document.getElementById('msg-' + index);
             if (el && chatContainer.value) {
               // Disable auto-scroll temporarily since user is manually navigating
               autoScrollEnabled.value = false;
+              if (pendingAutoScrollRaf !== null) {
+                cancelAnimationFrame(pendingAutoScrollRaf);
+                pendingAutoScrollRaf = null;
+              }
               chatContainer.value.scrollTo({
                 top: el.offsetTop - chatContainer.value.offsetTop - 20,
                 behavior: 'smooth',
@@ -1746,6 +1945,15 @@
           const handleScroll = () => {
             if (isInitialLoading.value) return;
             hasUserInteractedWithScroll.value = true;
+
+            if (
+              chatContainer.value &&
+              visibleStartIndex.value > 0 &&
+              chatContainer.value.scrollTop < WINDOW_TOP_EXPAND_THRESHOLD
+            ) {
+              expandVisibleWindowUpward();
+            }
+
             if (scrollTimeout) return;
             scrollTimeout = setTimeout(() => {
               updateActiveMessageIndex();
@@ -1780,9 +1988,8 @@
               }, delayMs);
             };
 
-            guardedCalibrate(100);
-            guardedCalibrate(260);
-            guardedCalibrate(500);
+            guardedCalibrate(140);
+            guardedCalibrate(380);
           };
 
           const updateActiveMessageIndex = () => {
@@ -1797,6 +2004,7 @@
             let minDistance = Infinity;
 
             for (let i = 0; i < messages.value.length; i++) {
+              if (i < visibleStartIndex.value) continue;
               if (messages.value[i].role === 'user') {
                 const el = document.getElementById('msg-' + i);
                 if (el) {
@@ -1937,6 +2145,10 @@
               saveLastActiveSessionId(currentSessionId.value);
             }
 
+            resetVisibleWindowToLatest();
+
+            ensureRenderCacheForVisibleMessages();
+
             try {
               await runInitialScrollCalibration();
             } finally {
@@ -1948,11 +2160,14 @@
 
           const MARKDOWN_RENDER_INTERVAL_MS = 70;
           const MARKDOWN_CACHE_MAX = 80;
+          const RENDER_CACHE_VERSION = 'v1';
           const markdownFrameTick = ref(0);
           const markdownCache = new Map();
           const markdownRenderStates = new Map();
           let markdownCacheSerial = 0;
           let markdownRenderTimer = null;
+          const pendingBackfillIndices = new Set();
+          let backfillScheduled = false;
 
           const rememberMarkdownCache = (key, html) => {
             if (!markdownCache.has(key) && markdownCache.size >= MARKDOWN_CACHE_MAX) {
@@ -2239,6 +2454,108 @@
             return state.lastHtml;
           };
 
+          const hasRenderableMessageCache = (msg) => {
+            return !!(
+              msg &&
+              msg.role === 'assistant' &&
+              msg.renderCacheVersion === RENDER_CACHE_VERSION &&
+              msg.renderedHtml
+            );
+          };
+
+          const hasRenderableThinkingCache = (msg) => {
+            if (!msg || msg.role !== 'assistant') return false;
+            if (msg.renderCacheVersion !== RENDER_CACHE_VERSION) return false;
+            if (!msg.thinking) return true;
+            return !!msg.thinkingRenderedHtml;
+          };
+
+          const finalizeMessageRenderCache = (index) => {
+            const msg = messages.value[index];
+            if (!msg || msg.role !== 'assistant') return false;
+            if (msg.error) return false;
+
+            const renderedHtml = renderMarkdown(msg.content || '', `content-${index}`);
+            let thinkingRenderedHtml = '';
+            if (msg.thinking) {
+              thinkingRenderedHtml = renderMarkdown(msg.thinking, `thinking-${index}`);
+            }
+
+            const contentUnchanged = msg.renderedHtml === renderedHtml;
+            const thinkingUnchanged = (msg.thinkingRenderedHtml || '') === thinkingRenderedHtml;
+            const versionUnchanged = msg.renderCacheVersion === RENDER_CACHE_VERSION;
+
+            if (contentUnchanged && thinkingUnchanged && versionUnchanged) {
+              return false;
+            }
+
+            msg.renderedHtml = renderedHtml;
+            msg.thinkingRenderedHtml = thinkingRenderedHtml;
+            msg.renderCacheVersion = RENDER_CACHE_VERSION;
+            return true;
+          };
+
+          const scheduleIdle = (task) => {
+            if (typeof window.requestIdleCallback === 'function') {
+              return window.requestIdleCallback(task, { timeout: 1200 });
+            }
+            return window.setTimeout(task, 48);
+          };
+
+          const flushRenderCacheBackfill = () => {
+            if (!pendingBackfillIndices.size) {
+              backfillScheduled = false;
+              return;
+            }
+
+            const queue = Array.from(pendingBackfillIndices);
+            pendingBackfillIndices.clear();
+            let changed = false;
+
+            for (const index of queue) {
+              changed = finalizeMessageRenderCache(index) || changed;
+            }
+
+            backfillScheduled = false;
+
+            if (changed) {
+              const sessionsClone = JSON.parse(JSON.stringify(sessions.value));
+              saveToIndexedDB(sessionsClone).catch((err) => {
+                console.error('Backfill render cache save failed', err);
+              });
+            }
+
+            if (pendingBackfillIndices.size) {
+              scheduleRenderCacheBackfill();
+            }
+          };
+
+          const scheduleRenderCacheBackfill = () => {
+            if (backfillScheduled) return;
+            backfillScheduled = true;
+            scheduleIdle(() => {
+              flushRenderCacheBackfill();
+            });
+          };
+
+          const ensureRenderCacheForVisibleMessages = () => {
+            for (let index = 0; index < messages.value.length; index++) {
+              const msg = messages.value[index];
+              if (!msg || msg.role !== 'assistant') continue;
+              if (msg.error) continue;
+
+              const hasContentCache = hasRenderableMessageCache(msg);
+              const hasThinkingCache = hasRenderableThinkingCache(msg);
+              if (!hasContentCache || !hasThinkingCache) {
+                pendingBackfillIndices.add(index);
+              }
+            }
+
+            if (pendingBackfillIndices.size) {
+              scheduleRenderCacheBackfill();
+            }
+          };
+
           const stopGeneration = () => {
             if (abortController) {
               abortController.abort();
@@ -2353,6 +2670,9 @@
                 showThinking: false,
                 usage: null,
                 error: null,
+                renderedHtml: '',
+                thinkingRenderedHtml: '',
+                renderCacheVersion: null,
               };
             } else {
               // For UI display, we just show the text prompt. Media is shown via a different UI indicator if needed.
@@ -2373,6 +2693,9 @@
                   showThinking: false,
                   usage: null,
                   error: null,
+                  renderedHtml: '',
+                  thinkingRenderedHtml: '',
+                  renderCacheVersion: null,
                 }) - 1;
             }
 
@@ -2519,6 +2842,13 @@
                 messages.value[targetIndex].isThinking = false;
               }
 
+              if (finalizeMessageRenderCache(targetIndex)) {
+                const sessionsClone = JSON.parse(JSON.stringify(sessions.value));
+                saveToIndexedDB(sessionsClone).catch((err) => {
+                  console.error('Finalize render cache save failed', err);
+                });
+              }
+
               isGenerating.value = false;
               abortController = null;
               scrollToBottom();
@@ -2567,7 +2897,7 @@
           };
 
           const adjustTextareaHeight = () => {
-            const textarea = document.querySelector('textarea');
+            const textarea = composerTextarea.value;
             if (textarea) {
               // Get current text lines
               const lineCount = (inputPrompt.value.match(/\n/g) || []).length + 1;
@@ -2621,8 +2951,12 @@
 
             nextTick(() => {
               adjustTextareaHeight();
+              if (composerTextarea.value) {
+                composerTextarea.value.focus();
+              }
             });
 
+            visibleStartIndex.value = Math.max(0, messages.value.length + 1 - WINDOW_SIZE);
             performRequest(prompt, mediaItems);
           };
 
@@ -2712,6 +3046,8 @@
             editingSessionName,
             editInputRef,
             messages,
+            visibleMessages,
+            visibleStartIndex,
             createNewSession,
             switchSession,
             startEditSession,
@@ -2720,6 +3056,7 @@
             inputPrompt,
             isGenerating,
             chatContainer,
+            composerTextarea,
             activeMessageIndex,
             scrollToMessage,
             handleScroll,
