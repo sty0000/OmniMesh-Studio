@@ -1981,6 +1981,26 @@
 
           const preprocessMarkdownText = (text) => {
             let processedText = text;
+            const mathBlocks = [];
+            let placeholderIndex = 0;
+            const mathPlaceholderPrefix = '@@MATH_BLOCK_';
+
+            const normalizeFeynmanSlash = (inputText, inMath = false) => {
+              if (!inputText) return inputText;
+              let normalized = inputText;
+
+              normalized = normalized.replace(/\\slashed\s*\{\s*([A-Za-z])\s*\}/g, '\\slashed{$1}');
+              normalized = normalized.replace(
+                /(^|[^A-Za-z\\])([A-Za-z])\s*(?:(?:\\!\s*){1,}|!{2,})\/+?/g,
+                (match, prefix, symbol) => `${prefix}\\slashed{${symbol}}`,
+              );
+
+              if (inMath) {
+                normalized = normalized.replace(/\$(\\slashed\{[A-Za-z]\})\$/g, '$1');
+              }
+
+              return normalized;
+            };
 
             if (processedText.includes('<think>') || processedText.includes('</think>')) {
               processedText = processedText.replace(/<\/?think>/g, '');
@@ -1990,29 +2010,57 @@
               processedText = processedText.replace(/\\\((.*?)\\\)/g, '$$$1$$');
             }
 
-            processedText = processedText.replace(
-              /(^|[^$\\])([a-zA-Z](?:\\!)+\/)(?!\$)/g,
-              '$1$$$2$$',
-            );
-
-            processedText = processedText.replace(
-              /(^|[^$\\])(\\slashed\{[^{}\n]+\})(?!\$)/g,
-              '$1$$$2$$',
-            );
-
-            const mathBlocks = [];
-            let placeholderIndex = 0;
-            const mathPlaceholderPrefix = '@@MATH_BLOCK_';
-
             if (processedText.includes('$') || processedText.includes('\\[')) {
               processedText = processedText.replace(
                 /(\$\$[\s\S]*?\$\$|\$[^\n$]+\$|\\\[[\s\S]*?\\\])/g,
                 (match) => {
-                  mathBlocks.push(match);
+                  mathBlocks.push(normalizeFeynmanSlash(match, true));
                   return `${mathPlaceholderPrefix}${placeholderIndex++}@@`;
                 },
               );
             }
+
+            const isFenceOpen = (lineText) => {
+              const matches = lineText.match(/```/g);
+              return matches ? matches.length % 2 === 1 : false;
+            };
+
+            const wrapSlashMathOutsideMathBlocks = (lineText) => {
+              let line = normalizeFeynmanSlash(lineText);
+
+              line = line.replace(
+                /(^|[^$\\])(\\slashed\{[A-Za-z]\})(?!\$)/g,
+                (match, prefix, slashExpr) => `${prefix}$${slashExpr}$`,
+              );
+
+              line = line.replace(
+                /(^|[^$\\])([A-Za-z]\s*(?:(?:\\!\s*){1,}|!{2,})\/+?)(?!\$)/g,
+                (match, prefix, rawExpr) => {
+                  const normalizedExpr = normalizeFeynmanSlash(rawExpr).replace(/\$/g, '').trim();
+                  const symbolMatch = normalizedExpr.match(/\\slashed\{([A-Za-z])\}/);
+                  if (!symbolMatch) return match;
+                  return `${prefix}$\\slashed{${symbolMatch[1]}}$`;
+                },
+              );
+
+              return line;
+            };
+
+            const plainLines = processedText.split('\n');
+            let inPlainCodeFence = false;
+            for (let i = 0; i < plainLines.length; i++) {
+              const line = plainLines[i];
+              const lineFenceOpen = isFenceOpen(line);
+
+              if (!inPlainCodeFence && !line.includes('@@MATH_BLOCK_')) {
+                plainLines[i] = wrapSlashMathOutsideMathBlocks(line);
+              }
+
+              if (lineFenceOpen) {
+                inPlainCodeFence = !inPlainCodeFence;
+              }
+            }
+            processedText = plainLines.join('\n');
 
             processedText = processedText.replace(
               /(?<!\$)(?<!\\)\^\{(.*?)\}\\?text\{(.*?)\}(?!\$)/g,
@@ -2023,11 +2071,6 @@
               /(?<!\$)(?<!\\)(\\(?:lambda|tau)(?:_R|_\{\\text\{[a-zA-Z]+\}\}(?:N_\{\\text\{[a-zA-Z]+\}\})?))(?!\$)/g,
               '$$$1$$',
             );
-
-            const isFenceOpen = (lineText) => {
-              const matches = lineText.match(/```/g);
-              return matches ? matches.length % 2 === 1 : false;
-            };
 
             const lines = processedText.split('\n');
             let inCodeFence = false;
@@ -2099,7 +2142,8 @@
             let html = marked.parse(processedText);
 
             for (let i = 0; i < mathBlocks.length; i++) {
-              html = html.replace(`@@MATH_BLOCK_${i}@@`, mathBlocks[i]);
+              const token = `@@MATH_BLOCK_${i}@@`;
+              html = html.split(token).join(mathBlocks[i]);
             }
 
             const tempDiv = document.createElement('div');
