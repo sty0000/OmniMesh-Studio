@@ -3,3 +3,5 @@ dist/
 coverage/
 .env
 service_start_log.txt
+frontend.log
+vllm_server.log
