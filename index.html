@@ -1240,6 +1240,7 @@
 
           const initialForceScrollEnabled = ref(loadInitialForceScrollPreference());
           const hasUserInteractedWithScroll = ref(false);
+          const isInitialLoading = ref(true);
 
           const persistInitialForceScrollPreference = (enabled) => {
             try {
@@ -1743,6 +1744,7 @@
           // Throttled scroll handler to update active dot and auto-scroll state
           let scrollTimeout;
           const handleScroll = () => {
+            if (isInitialLoading.value) return;
             hasUserInteractedWithScroll.value = true;
             if (scrollTimeout) return;
             scrollTimeout = setTimeout(() => {
@@ -1780,6 +1782,7 @@
 
             guardedCalibrate(100);
             guardedCalibrate(260);
+            guardedCalibrate(500);
           };
 
           const updateActiveMessageIndex = () => {
@@ -1904,6 +1907,7 @@
           // Load data asynchronously on mount
           onMounted(async () => {
             fetchLogAutomatically();
+            isInitialLoading.value = true;
             hasUserInteractedWithScroll.value = false;
 
             // Try loading from IndexedDB first (huge capacity)
@@ -1929,11 +1933,17 @@
               const matchedSession = lastActiveId
                 ? loadedSessions.find((session) => session.id === lastActiveId)
                 : null;
-              currentSessionId.value = matchedSession ? matchedSession.id : loadedSessions[0].id;
+              currentSessionId.value = matchedSession ? matchedSession.id : loadedSessions.at(-1).id;
               saveLastActiveSessionId(currentSessionId.value);
             }
 
-            await runInitialScrollCalibration();
+            try {
+              await runInitialScrollCalibration();
+            } finally {
+              window.setTimeout(() => {
+                isInitialLoading.value = false;
+              }, 1000);
+            }
           });
 
           const MARKDOWN_RENDER_INTERVAL_MS = 70;
