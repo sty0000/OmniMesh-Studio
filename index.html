@@ -719,13 +719,13 @@
                       class="think-content px-4 text-sm text-gray-600 border-t border-gray-100"
                       :class="msg.showThinking ? 'expanded py-3' : 'collapsed'"
                     >
-                      <div v-html="renderMarkdown(msg.thinking)"></div>
+                      <div v-html="renderMarkdown(msg.thinking, `thinking-${index}`)"></div>
                     </div>
                   </div>
 
                   <div
                     class="message-content text-base md:text-[1.05rem] leading-relaxed break-words"
-                    v-html="renderMarkdown(msg.content)"
+                    v-html="renderMarkdown(msg.content, `content-${index}`)"
                   ></div>
 
                   <!-- Error State -->
@@ -1097,6 +1097,103 @@
           const chatContainer = ref(null);
           const activeMessageIndex = ref(-1);
           const editInputRef = ref(null);
+
+          const STREAM_TICK_MS = 16;
+          const STREAM_MIN_CHARS_PER_TICK = 2;
+          const STREAM_MAX_CHARS_PER_TICK = 24;
+          const streamDisplayBuffers = new Map();
+          let streamDrainTimer = null;
+
+          const estimateCharsPerTick = (pendingLength) => {
+            const dynamic = Math.ceil(pendingLength / 80);
+            return Math.min(
+              STREAM_MAX_CHARS_PER_TICK,
+              Math.max(STREAM_MIN_CHARS_PER_TICK, dynamic),
+            );
+          };
+
+          const hasStreamBufferPending = () => {
+            for (const state of streamDisplayBuffers.values()) {
+              if (state.pending.length > 0 || !state.done) {
+                return true;
+              }
+            }
+            return false;
+          };
+
+          const scheduleStreamDrain = () => {
+            if (streamDrainTimer !== null) return;
+            streamDrainTimer = window.setTimeout(() => {
+              streamDrainTimer = null;
+              let touched = false;
+
+              for (const [index, state] of streamDisplayBuffers.entries()) {
+                if (!messages.value[index] || messages.value[index].role !== 'assistant') {
+                  streamDisplayBuffers.delete(index);
+                  continue;
+                }
+
+                if (!state.pending.length) {
+                  if (state.done) {
+                    streamDisplayBuffers.delete(index);
+                  }
+                  continue;
+                }
+
+                const takeCount = estimateCharsPerTick(state.pending.length);
+                const outgoing = state.pending.slice(0, takeCount);
+                state.pending = state.pending.slice(takeCount);
+                messages.value[index].content += outgoing;
+                touched = true;
+
+                if (!state.pending.length && state.done) {
+                  streamDisplayBuffers.delete(index);
+                }
+              }
+
+              if (touched) {
+                scrollToBottom();
+              }
+
+              if (hasStreamBufferPending()) {
+                scheduleStreamDrain();
+              }
+            }, STREAM_TICK_MS);
+          };
+
+          const appendAssistantContentBuffered = (index, text) => {
+            if (!text) return;
+            let state = streamDisplayBuffers.get(index);
+            if (!state) {
+              state = { pending: '', done: false };
+              streamDisplayBuffers.set(index, state);
+            }
+            state.pending += text;
+            scheduleStreamDrain();
+          };
+
+          const markAssistantBufferDone = (index) => {
+            let state = streamDisplayBuffers.get(index);
+            if (!state) {
+              state = { pending: '', done: true };
+              streamDisplayBuffers.set(index, state);
+            }
+            state.done = true;
+            scheduleStreamDrain();
+          };
+
+          const flushAssistantBuffer = (index) => {
+            const state = streamDisplayBuffers.get(index);
+            if (!state || !messages.value[index]) return;
+            if (state.pending) {
+              messages.value[index].content += state.pending;
+            }
+            streamDisplayBuffers.delete(index);
+          };
+
+          const discardAssistantBuffer = (index) => {
+            streamDisplayBuffers.delete(index);
+          };
 
           // Session Management
           const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -1734,116 +1831,146 @@
             }
           });
 
-          const renderMarkdown = (text) => {
-            if (!text) return '';
+          const MARKDOWN_RENDER_INTERVAL_MS = 70;
+          const MARKDOWN_CACHE_MAX = 80;
+          const markdownFrameTick = ref(0);
+          const markdownCache = new Map();
+          const markdownRenderStates = new Map();
+          let markdownCacheSerial = 0;
+          let markdownRenderTimer = null;
 
-            // First, preprocess the text to handle <think> tags if they leak into content
+          const rememberMarkdownCache = (key, html) => {
+            if (!markdownCache.has(key) && markdownCache.size >= MARKDOWN_CACHE_MAX) {
+              let oldestKey = null;
+              let oldestSerial = Infinity;
+              for (const [cacheKey, cacheVal] of markdownCache.entries()) {
+                if (cacheVal.serial < oldestSerial) {
+                  oldestSerial = cacheVal.serial;
+                  oldestKey = cacheKey;
+                }
+              }
+              if (oldestKey !== null) {
+                markdownCache.delete(oldestKey);
+              }
+            }
+            markdownCache.set(key, { html, serial: ++markdownCacheSerial });
+          };
+
+          const scheduleMarkdownRenderTick = () => {
+            if (markdownRenderTimer !== null) return;
+            markdownRenderTimer = window.setTimeout(() => {
+              markdownRenderTimer = null;
+              markdownFrameTick.value += 1;
+            }, MARKDOWN_RENDER_INTERVAL_MS);
+          };
+
+          const preprocessMarkdownText = (text) => {
             let processedText = text;
-            const thinkMatch = processedText.match(/<think>([\s\S]*?)(?:<\/think>|$)/);
-            if (thinkMatch) {
-              // If we found a think tag in the regular content, we should strip it
-              processedText = processedText.replace(/<think>/g, '').replace(/<\/think>/g, '');
+
+            if (processedText.includes('<think>') || processedText.includes('</think>')) {
+              processedText = processedText.replace(/<\/?think>/g, '');
             }
 
-            // Handle escaped parentheses \( ... \) which some models output instead of $ ... $
-            // We convert them to standard $ ... $ for KaTeX to process properly within Markdown
-            // Do this before protecting math blocks
-            processedText = processedText.replace(/\\\((.*?)\\\)/g, '$$$1$$');
+            if (processedText.includes('\\(') && processedText.includes('\\)')) {
+              processedText = processedText.replace(/\\\((.*?)\\\)/g, '$$$1$$');
+            }
 
-            // First, protect already wrapped math to avoid double wrapping.
-            // We use temporary placeholders for $...$ and $$...$$
             const mathBlocks = [];
             let placeholderIndex = 0;
 
-            processedText = processedText.replace(
-              /(\$\$[\s\S]*?\$\$|\$[\s\S]*?\$|\\\[[\s\S]*?\\\])/g,
-              (match) => {
-                mathBlocks.push(match);
-                return `__MATH_BLOCK_${placeholderIndex++}__`;
-              },
-            );
+            if (processedText.includes('$') || processedText.includes('\\[')) {
+              processedText = processedText.replace(
+                /(\$\$[\s\S]*?\$\$|\$[^\n$]+\$|\\\[[\s\S]*?\\\])/g,
+                (match) => {
+                  mathBlocks.push(match);
+                  return `__MATH_BLOCK_${placeholderIndex++}__`;
+                },
+              );
+            }
 
-            // Preprocess some unescaped LaTeX that Qwen might output without proper $ signs.
-            // For example, if it outputs ^{210}\text{Pb} without math delimiters, we try to wrap it.
-            // Ensure we don't double wrap if it's already inside a math block placeholder
-            // Note: Some models output \text without escaping, so we also check for \\?text
             processedText = processedText.replace(
               /(?<!\$)(?<!\\)\^\{(.*?)\}\\?text\{(.*?)\}(?!\$)/g,
               '$^{$1}\\text{$2}$',
             );
 
-            // 2. Fix for common inline unescaped formulas like \lambda_{\text{Bi}}N_{\text{Bi}} or \tau_R
-            // This regex tries to find common Greek letters and subscripts that are floating outside of math blocks
             processedText = processedText.replace(
               /(?<!\$)(?<!\\)(\\(?:lambda|tau)(?:_R|_\{\\text\{[a-zA-Z]+\}\}(?:N_\{\\text\{[a-zA-Z]+\}\})?))(?!\$)/g,
               '$$$1$$',
             );
 
-            // 2. Heuristic for standalone equations starting with \frac, \sum, \int, \lambda, etc.
-            // This regex tries to find blocks of text that look heavily like LaTeX math but aren't wrapped.
-            // A more specific targeted fix for the user's reported differential equation and similar raw LaTeX lines
-            // If a line contains \frac, \lambda, \text, =, _, ^ and NO regular words (or very few), it's probably an equation.
+            const isFenceOpen = (lineText) => {
+              const matches = lineText.match(/```/g);
+              return matches ? matches.length % 2 === 1 : false;
+            };
+
             const lines = processedText.split('\n');
+            let inCodeFence = false;
             for (let i = 0; i < lines.length; i++) {
-              let line = lines[i];
-              // Check if line contains strong LaTeX indicators but no placeholders
-              if (
-                !line.includes('__MATH_BLOCK_') &&
-                (line.includes('\\frac') ||
-                  line.includes('\\lambda') ||
-                  line.includes('\\sum') ||
-                  line.includes('\\int')) &&
-                (line.includes('=') || line.includes('_') || line.includes('^')) &&
-                !line.includes('```') // Ensure we don't accidentally wrap code blocks
-              ) {
-                // Wrap the entire line in block math
-                lines[i] = `$$ ${line.trim()} $$`;
+              const line = lines[i];
+              const lineFenceOpen = isFenceOpen(line);
+
+              if (!inCodeFence) {
+                if (
+                  !line.includes('__MATH_BLOCK_') &&
+                  (line.includes('\\frac') ||
+                    line.includes('\\lambda') ||
+                    line.includes('\\sum') ||
+                    line.includes('\\int')) &&
+                  (line.includes('=') || line.includes('_') || line.includes('^')) &&
+                  !line.includes('```')
+                ) {
+                  lines[i] = `$$ ${line.trim()} $$`;
+                }
+              }
+
+              if (lineFenceOpen) {
+                inCodeFence = !inCodeFence;
               }
             }
             processedText = lines.join('\n');
 
-            // 3. Fix for decay chains (e.g. ^{222}\text{Rn} \rightarrow ^{214}\text{Bi})
-            // If a line contains \rightarrow and looks like a chemical/decay chain without block delimiters
             const linesForChain = processedText.split('\n');
+            inCodeFence = false;
             for (let i = 0; i < linesForChain.length; i++) {
-              let line = linesForChain[i];
-              if (
-                line.includes('\\rightarrow') &&
-                !line.includes('__MATH_BLOCK_') &&
-                !line.includes('```')
-              ) {
-                // Extract the core chain if it's mixed with text (e.g. " - **关键步骤**： ^{222}\text{Rn} \rightarrow ...")
-                // Let's wrap any contiguous block containing \rightarrow that isn't already wrapped.
-                linesForChain[i] = line.replace(
-                  /([A-Za-z0-9^{}\\_]+(?:\s*\\rightarrow\s*[A-Za-z0-9^{}\\_]+)+)/g,
-                  '$$$1$$',
-                );
+              const line = linesForChain[i];
+              const lineFenceOpen = isFenceOpen(line);
+
+              if (!inCodeFence) {
+                if (line.includes('\\rightarrow') && !line.includes('__MATH_BLOCK_') && !line.includes('```')) {
+                  linesForChain[i] = line.replace(
+                    /([A-Za-z0-9^{}\\_]+(?:\s*\\rightarrow\s*[A-Za-z0-9^{}\\_]+)+)/g,
+                    '$$$1$$',
+                  );
+                }
+              }
+
+              if (lineFenceOpen) {
+                inCodeFence = !inCodeFence;
               }
             }
             processedText = linesForChain.join('\n');
 
-            // Restore the protected math blocks
             for (let i = 0; i < placeholderIndex; i++) {
               processedText = processedText.replace(`__MATH_BLOCK_${i}__`, mathBlocks[i]);
             }
 
-            // Convert markdown to HTML
-            let html = marked.parse(processedText);
+            return processedText;
+          };
 
-            // Setup KaTeX auto-render config
-            const katexOptions = {
-              delimiters: [
-                { left: '$$', right: '$$', display: true },
-                { left: '\\[', right: '\\]', display: true },
-                { left: '$', right: '$', display: false },
-                { left: '\\(', right: '\\)', display: false },
-              ],
-              throwOnError: false,
-              trust: true, // Allow \text and other potentially unsafe commands
-              strict: false, // Less strict about LaTeX syntax errors
-            };
+          const katexOptions = {
+            delimiters: [
+              { left: '$$', right: '$$', display: true },
+              { left: '\\[', right: '\\]', display: true },
+              { left: '$', right: '$', display: false },
+              { left: '\\(', right: '\\)', display: false },
+            ],
+            throwOnError: false,
+            trust: true,
+            strict: false,
+          };
 
-            // Create a temporary DOM element to render math
+          const renderMarkdownSegment = (text) => {
+            const html = marked.parse(preprocessMarkdownText(text));
             const tempDiv = document.createElement('div');
             tempDiv.innerHTML = html;
 
@@ -1856,6 +1983,85 @@
             }
 
             return tempDiv.innerHTML;
+          };
+
+          const splitMarkdownSegments = (text) => {
+            if (!text) return [''];
+            const segments = text.split(/(```[\s\S]*?```)/g);
+            return segments.filter((segment) => segment !== '');
+          };
+
+          const renderMarkdownNow = (source, cacheScope) => {
+            const cacheKey = `${cacheScope}::${source}`;
+            const cached = markdownCache.get(cacheKey);
+            if (cached) {
+              cached.serial = ++markdownCacheSerial;
+              return cached.html;
+            }
+
+            const segments = splitMarkdownSegments(source);
+            if (segments.length > 1 && source.length > 1200) {
+              const htmlParts = [];
+              for (let i = 0; i < segments.length; i++) {
+                const segment = segments[i];
+                const segmentKey = `${cacheScope}::seg:${i}::${segment}`;
+                const segmentCached = markdownCache.get(segmentKey);
+                if (segmentCached) {
+                  segmentCached.serial = ++markdownCacheSerial;
+                  htmlParts.push(segmentCached.html);
+                } else {
+                  const segmentHtml = renderMarkdownSegment(segment);
+                  rememberMarkdownCache(segmentKey, segmentHtml);
+                  htmlParts.push(segmentHtml);
+                }
+              }
+              const merged = htmlParts.join('');
+              rememberMarkdownCache(cacheKey, merged);
+              return merged;
+            }
+
+            const finalHtml = renderMarkdownSegment(source);
+            rememberMarkdownCache(cacheKey, finalHtml);
+            return finalHtml;
+          };
+
+          const renderMarkdown = (text, cacheScope = 'default') => {
+            markdownFrameTick.value;
+            if (!text) return '';
+
+            const source = String(text);
+            let state = markdownRenderStates.get(cacheScope);
+            if (!state) {
+              state = {
+                lastText: '',
+                lastHtml: '',
+                lastRenderAt: 0,
+                pendingText: '',
+              };
+              markdownRenderStates.set(cacheScope, state);
+            }
+
+            if (source === state.lastText) {
+              return state.lastHtml;
+            }
+
+            state.pendingText = source;
+
+            const now = performance.now();
+            const elapsed = now - state.lastRenderAt;
+            const shouldRenderNow = state.lastRenderAt === 0 || elapsed >= MARKDOWN_RENDER_INTERVAL_MS;
+
+            if (shouldRenderNow) {
+              const nextText = state.pendingText;
+              state.lastHtml = renderMarkdownNow(nextText, cacheScope);
+              state.lastText = nextText;
+              state.lastRenderAt = now;
+              state.pendingText = '';
+              return state.lastHtml;
+            }
+
+            scheduleMarkdownRenderTick();
+            return state.lastHtml;
           };
 
           const stopGeneration = () => {
@@ -1995,6 +2201,8 @@
                 }) - 1;
             }
 
+            discardAssistantBuffer(targetIndex);
+
             // Reset auto-scroll flag to true on new request
             autoScrollEnabled.value = true;
 
@@ -2087,7 +2295,7 @@
                         messages.value[targetIndex].isThinking = false;
 
                         if (parts[1]) {
-                          messages.value[targetIndex].content += parts[1];
+                          appendAssistantContentBuffered(targetIndex, parts[1]);
                         }
                       } else {
                         messages.value[targetIndex].thinking += incomingContent;
@@ -2097,7 +2305,7 @@
                       if (messages.value[targetIndex].isThinking) {
                         messages.value[targetIndex].isThinking = false;
                       }
-                      messages.value[targetIndex].content += incomingContent;
+                      appendAssistantContentBuffered(targetIndex, incomingContent);
                     }
                     scrollToBottom();
                   }
@@ -2111,9 +2319,11 @@
               }
             } catch (err) {
               if (err.name === 'AbortError') {
+                flushAssistantBuffer(targetIndex);
                 messages.value[targetIndex].content += '\n\n*[已停止生成]*';
               } else {
                 console.error(err);
+                flushAssistantBuffer(targetIndex);
                 messages.value[targetIndex].error = err.message || '请求超时或网络异常';
 
                 // Handle connection failure and start auto-reconnect
@@ -2127,6 +2337,8 @@
                 }
               }
             } finally {
+              markAssistantBufferDone(targetIndex);
+
               // Always ensure thinking state is cleared when generation ends (normally, errored, or aborted)
               if (messages.value[targetIndex] && messages.value[targetIndex].isThinking) {
                 messages.value[targetIndex].isThinking = false;
