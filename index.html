@@ -282,9 +282,12 @@
         <div class="flex gap-4 items-center">
           <!-- Settings Toggle -->
           <button
-            @click="settingsOpen = !settingsOpen"
+            ref="settingsToggleRef"
+            @click="toggleSettingsPanel"
             class="p-2 rounded-md hover:bg-blue-700 transition-colors text-blue-100 hover:text-white"
             title="参数设置"
+            :aria-expanded="settingsOpen ? 'true' : 'false'"
+            aria-controls="settings-sidebar"
           >
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -402,14 +405,29 @@
           </div>
         </aside>
 
+        <!-- Settings Overlay -->
+        <div
+          v-if="settingsOpen"
+          class="absolute inset-0 bg-black/30 z-20"
+          @click="closeSettingsPanel"
+          aria-hidden="true"
+        ></div>
+
         <!-- Right Settings Sidebar (Overlay or Flex depending on layout) -->
         <aside
-          class="w-72 bg-white border-l border-gray-200 p-4 flex flex-col gap-4 overflow-y-auto flex-shrink-0 absolute right-0 top-0 bottom-0 z-30 transition-transform duration-300 shadow-xl"
+          id="settings-sidebar"
+          ref="settingsPanelRef"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="settings-sidebar-title"
+          class="w-[85vw] max-w-sm md:w-80 bg-white border-l border-gray-200 p-4 flex flex-col gap-4 overflow-y-auto flex-shrink-0 absolute right-0 top-0 bottom-0 z-30 transition-transform duration-300 shadow-xl"
           :class="settingsOpen ? 'translate-x-0' : 'translate-x-full'"
         >
           <div class="flex justify-between items-center border-b pb-2">
-            <h3 class="font-bold text-gray-700">系统设置</h3>
-            <button @click="settingsOpen = false" class="text-gray-400 hover:text-gray-600">
+            <h3 id="settings-sidebar-title" ref="settingsTitleRef" tabindex="-1" class="font-bold text-gray-700">
+              系统设置
+            </h3>
+            <button @click="closeSettingsPanel" class="text-gray-400 hover:text-gray-600" title="关闭设置">
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
                   stroke-linecap="round"
@@ -476,71 +494,13 @@
             </p>
           </div>
 
-          <h3 class="font-bold text-gray-700 border-b pb-2 mt-2">采样参数</h3>
-
-          <div
-            class="flex gap-4 items-center justify-between bg-gray-50 p-2 rounded-lg mb-2 border"
-          >
-            <span class="text-sm font-medium text-gray-700">API 地址</span>
-            <input
-              type="text"
-              v-model="config.apiBase"
-              class="border border-gray-300 rounded px-2 py-1 text-xs w-40 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
+          <div class="pt-1">
+            <h4 class="text-xs font-semibold text-gray-700 uppercase tracking-wide">推理参数</h4>
+            <p class="text-xs text-gray-500 mt-1 mb-2">高频参数，优先在此调节回复风格与长度。</p>
           </div>
-          <div
-            class="flex gap-4 items-center justify-between bg-gray-50 p-2 rounded-lg mb-2 border"
-          >
-            <span class="text-sm font-medium text-gray-700">多轮对话</span>
-            <label class="flex items-center cursor-pointer">
-              <div class="relative">
-                <input type="checkbox" v-model="multiTurn" class="sr-only" />
-                <div
-                  class="block bg-blue-400 w-10 h-6 rounded-full transition-colors"
-                  :class="{'bg-blue-200': multiTurn}"
-                ></div>
-                <div
-                  class="dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform"
-                  :class="{'transform translate-x-4': multiTurn}"
-                ></div>
-              </div>
-            </label>
-          </div>
-          <div
-            class="flex gap-4 items-center justify-between bg-gray-50 p-2 rounded-lg mb-2 border"
-          >
-            <span class="text-sm font-medium text-gray-700">仅首次加载时强制滚动</span>
-            <label class="flex items-center cursor-pointer">
-              <div class="relative">
-                <input
-                  type="checkbox"
-                  :checked="initialForceScrollEnabled"
-                  @change="setInitialForceScrollEnabled($event.target.checked)"
-                  class="sr-only"
-                />
-                <div
-                  class="block bg-blue-400 w-10 h-6 rounded-full transition-colors"
-                  :class="{'bg-blue-200': initialForceScrollEnabled}"
-                ></div>
-                <div
-                  class="dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform"
-                  :class="{'transform translate-x-4': initialForceScrollEnabled}"
-                ></div>
-              </div>
-            </label>
-          </div>
-          <p class="text-[10px] text-gray-400 mt-1 mb-2 px-1">
-            仅页面初次恢复历史时生效，不影响会话切换。
-          </p>
-          <button
-            @click="clearCurrentChat"
-            class="w-full bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 px-3 py-2 rounded text-sm font-semibold transition-colors mb-2"
-          >
-            清空当前对话
-          </button>
 
           <!-- Preset Selection -->
-          <div>
+          <div class="border border-gray-100 rounded-lg p-3 bg-gray-50/50">
             <label class="block text-sm font-medium text-gray-700 mb-2">预设模式</label>
             <div class="grid grid-cols-2 gap-2">
               <button
@@ -576,13 +536,13 @@
 
           <!-- Parameters (Disabled if not custom, but visually visible) -->
           <div
-            class="space-y-4 mt-2 transition-opacity"
+            class="space-y-4 mt-2 transition-opacity border border-gray-100 rounded-lg p-3 bg-gray-50/50"
             :class="activePreset === 'custom' ? 'opacity-100' : 'opacity-60'"
           >
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1 flex justify-between">
                 <span>Temperature</span>
-                <span class="text-gray-500">{{ params.temperature }}</span>
+                <span class="text-gray-500">{{ debouncedParamDisplay.temperature }}</span>
               </label>
               <input
                 type="range"
@@ -602,7 +562,7 @@
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1 flex justify-between">
                 <span>Top P</span>
-                <span class="text-gray-500">{{ params.top_p }}</span>
+                <span class="text-gray-500">{{ debouncedParamDisplay.top_p }}</span>
               </label>
               <input
                 type="range"
@@ -628,9 +588,76 @@
                 class="w-full border rounded px-2 py-1.5 text-sm"
                 :disabled="activePreset !== 'custom'"
               />
+              <p class="text-[10px] text-gray-500 mt-0.5">当前显示值：{{ debouncedParamDisplay.max_tokens }}</p>
               <p class="text-[10px] text-gray-400 mt-1">单次回复生成的最大Token数量。</p>
             </div>
           </div>
+
+          <div class="pt-1">
+            <h4 class="text-xs font-semibold text-gray-700 uppercase tracking-wide">连接与行为</h4>
+            <p class="text-xs text-gray-500 mt-1 mb-2">低频设置，影响连接方式与对话交互习惯。</p>
+          </div>
+
+          <div class="border border-gray-100 rounded-lg p-3 bg-gray-50/50 space-y-2">
+            <div class="flex gap-4 items-center justify-between bg-white p-2 rounded-lg border">
+              <span class="text-sm font-medium text-gray-700">多轮对话</span>
+              <label class="flex items-center cursor-pointer">
+                <div class="relative">
+                  <input type="checkbox" v-model="multiTurn" class="sr-only" />
+                  <div
+                    class="block bg-blue-400 w-10 h-6 rounded-full transition-colors"
+                    :class="{'bg-blue-200': multiTurn}"
+                  ></div>
+                  <div
+                    class="dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform"
+                    :class="{'transform translate-x-4': multiTurn}"
+                  ></div>
+                </div>
+              </label>
+            </div>
+
+            <div class="flex gap-4 items-center justify-between bg-white p-2 rounded-lg border">
+              <span class="text-sm font-medium text-gray-700">仅首次加载时强制滚动</span>
+              <label class="flex items-center cursor-pointer">
+                <div class="relative">
+                  <input
+                    type="checkbox"
+                    :checked="initialForceScrollEnabled"
+                    @change="setInitialForceScrollEnabled($event.target.checked)"
+                    class="sr-only"
+                  />
+                  <div
+                    class="block bg-blue-400 w-10 h-6 rounded-full transition-colors"
+                    :class="{'bg-blue-200': initialForceScrollEnabled}"
+                  ></div>
+                  <div
+                    class="dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform"
+                    :class="{'transform translate-x-4': initialForceScrollEnabled}"
+                  ></div>
+                </div>
+              </label>
+            </div>
+
+            <p class="text-[10px] text-gray-400 px-1">
+              仅页面初次恢复历史时生效，不影响会话切换。
+            </p>
+
+            <div class="flex gap-4 items-center justify-between bg-white p-2 rounded-lg border">
+              <span class="text-sm font-medium text-gray-700">API 地址</span>
+              <input
+                type="text"
+                v-model="config.apiBase"
+                class="border border-gray-300 rounded px-2 py-1 text-xs w-40 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          <button
+            @click="clearCurrentChat"
+            class="w-full bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 px-3 py-2 rounded text-sm font-semibold transition-colors mb-2"
+          >
+            清空当前对话
+          </button>
 
           <div v-if="config.apiKey" class="mt-4 pt-4 border-t">
             <p class="text-xs text-green-600 flex items-center gap-1">
@@ -1075,7 +1102,7 @@
     </div>
 
     <script>
-      const { createApp, ref, reactive, nextTick, onMounted, computed } = Vue;
+      const { createApp, ref, reactive, nextTick, onMounted, computed, onBeforeUnmount } = Vue;
 
       createApp({
         setup() {
@@ -1108,10 +1135,148 @@
             max_tokens: 8192, // 提高默认值
           });
 
+          const getDefaultInferenceParams = () => ({
+            temperature: 0.7,
+            top_p: 0.9,
+            max_tokens: Math.min(8192, config.maxModelLen),
+          });
+
+          const normalizeInferenceParams = (inferenceParams) => {
+            const defaults = getDefaultInferenceParams();
+            const merged = {
+              ...defaults,
+              ...(inferenceParams || {}),
+            };
+
+            return {
+              temperature:
+                typeof merged.temperature === 'number' && Number.isFinite(merged.temperature)
+                  ? merged.temperature
+                  : defaults.temperature,
+              top_p:
+                typeof merged.top_p === 'number' && Number.isFinite(merged.top_p)
+                  ? merged.top_p
+                  : defaults.top_p,
+              max_tokens:
+                typeof merged.max_tokens === 'number' && Number.isFinite(merged.max_tokens)
+                  ? Math.min(merged.max_tokens, config.maxModelLen)
+                  : defaults.max_tokens,
+            };
+          };
+
+          const ensureSessionInferenceState = (session) => {
+            if (!session) return;
+            session.inferenceParams = normalizeInferenceParams(session.inferenceParams);
+            if (!session.preset || typeof session.preset !== 'string') {
+              session.preset = 'balanced';
+            }
+          };
+
+          const syncParamsFromSession = (session) => {
+            ensureSessionInferenceState(session);
+            if (!session || !session.inferenceParams) return;
+
+            params.temperature = session.inferenceParams.temperature;
+            params.top_p = session.inferenceParams.top_p;
+            params.max_tokens = session.inferenceParams.max_tokens;
+            activePreset.value = session.preset || 'balanced';
+          };
+
+          const persistCurrentSessionParams = () => {
+            const session = currentSession.value;
+            if (!session) return;
+            ensureSessionInferenceState(session);
+            session.inferenceParams = normalizeInferenceParams({
+              temperature: params.temperature,
+              top_p: params.top_p,
+              max_tokens: params.max_tokens,
+            });
+            session.preset = activePreset.value || 'custom';
+
+            params.temperature = session.inferenceParams.temperature;
+            params.top_p = session.inferenceParams.top_p;
+            params.max_tokens = session.inferenceParams.max_tokens;
+          };
+
           const activePreset = ref('balanced');
           const sidebarOpen = ref(true);
           const settingsOpen = ref(false);
           const autoScrollEnabled = ref(true);
+          const settingsToggleRef = ref(null);
+          const settingsPanelRef = ref(null);
+          const settingsTitleRef = ref(null);
+          const debouncedParamDisplay = reactive({
+            temperature: params.temperature,
+            top_p: params.top_p,
+            max_tokens: params.max_tokens,
+          });
+          let paramDisplayDebounceTimer = null;
+
+          const closeSettingsPanel = () => {
+            settingsOpen.value = false;
+          };
+
+          const toggleSettingsPanel = () => {
+            settingsOpen.value = !settingsOpen.value;
+          };
+
+          const updateBodyScrollLock = (locked) => {
+            if (!document || !document.body) return;
+            document.body.style.overflow = locked ? 'hidden' : '';
+          };
+
+          const handleSettingsKeydown = (event) => {
+            if (!settingsOpen.value) return;
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              closeSettingsPanel();
+            }
+          };
+
+          Vue.watch(
+            settingsOpen,
+            async (isOpen) => {
+              updateBodyScrollLock(isOpen);
+
+              if (isOpen) {
+                window.addEventListener('keydown', handleSettingsKeydown);
+                await nextTick();
+                if (settingsTitleRef.value && typeof settingsTitleRef.value.focus === 'function') {
+                  settingsTitleRef.value.focus();
+                }
+              } else {
+                window.removeEventListener('keydown', handleSettingsKeydown);
+                await nextTick();
+                if (settingsToggleRef.value && typeof settingsToggleRef.value.focus === 'function') {
+                  settingsToggleRef.value.focus();
+                }
+              }
+            },
+            { immediate: true },
+          );
+
+          Vue.watch(
+            params,
+            (newParams) => {
+              if (paramDisplayDebounceTimer) {
+                clearTimeout(paramDisplayDebounceTimer);
+              }
+              paramDisplayDebounceTimer = setTimeout(() => {
+                debouncedParamDisplay.temperature = newParams.temperature;
+                debouncedParamDisplay.top_p = newParams.top_p;
+                debouncedParamDisplay.max_tokens = newParams.max_tokens;
+              }, 100);
+            },
+            { deep: true, immediate: true },
+          );
+
+          onBeforeUnmount(() => {
+            window.removeEventListener('keydown', handleSettingsKeydown);
+            updateBodyScrollLock(false);
+            if (paramDisplayDebounceTimer) {
+              clearTimeout(paramDisplayDebounceTimer);
+            }
+          });
 
           const applyPreset = (presetName) => {
             activePreset.value = presetName;
@@ -1128,10 +1293,13 @@
               params.top_p = 0.1;
               params.max_tokens = Math.min(8192, config.maxModelLen);
             }
+
+            persistCurrentSessionParams();
           };
 
           const onParamChange = () => {
             activePreset.value = 'custom';
+            persistCurrentSessionParams();
           };
 
           const multiTurn = ref(true);
@@ -1435,10 +1603,44 @@
           };
 
           // Initialize state
-          const sessions = ref([{ id: generateId(), name: '对话 1', messages: [] }]);
+          const sessions = ref([
+            {
+              id: generateId(),
+              name: '对话 1',
+              messages: [],
+              inferenceParams: getDefaultInferenceParams(),
+              preset: 'balanced',
+            },
+          ]);
           const currentSessionId = ref(sessions.value[0].id);
           const editingSessionId = ref(null);
           const editingSessionName = ref('');
+
+          const normalizeSessionTitle = (title) => {
+            return String(title || '').trim().toLowerCase();
+          };
+
+          const getUniqueSessionTitle = (baseTitle, excludeSessionId = null) => {
+            const trimmedBase = String(baseTitle || '').trim() || '未命名对话';
+            const usedTitleKeys = new Set(
+              sessions.value
+                .filter((session) => session.id !== excludeSessionId)
+                .map((session) => normalizeSessionTitle(session.name)),
+            );
+
+            if (!usedTitleKeys.has(normalizeSessionTitle(trimmedBase))) {
+              return trimmedBase;
+            }
+
+            let suffix = 2;
+            let candidate = `${trimmedBase} (${suffix})`;
+            while (usedTitleKeys.has(normalizeSessionTitle(candidate))) {
+              suffix += 1;
+              candidate = `${trimmedBase} (${suffix})`;
+            }
+
+            return candidate;
+          };
 
           // Watch and save sessions to IndexedDB asynchronously
           // We use a simple debounce to avoid hammering the DB on every keystroke/token
@@ -1466,6 +1668,20 @@
           const messages = computed(() => {
             return currentSession.value.messages;
           });
+
+          const normalizeAllSessionsInferenceState = () => {
+            for (const session of sessions.value) {
+              ensureSessionInferenceState(session);
+            }
+          };
+
+          Vue.watch(
+            currentSessionId,
+            () => {
+              syncParamsFromSession(currentSession.value);
+            },
+            { immediate: true },
+          );
 
           const WINDOW_SIZE = 20;
           const WINDOW_EXPAND_STEP = 20;
@@ -1606,10 +1822,13 @@
 
           const createNewSession = () => {
             const newId = generateId();
+            const baseName = `对话 ${sessions.value.length + 1}`;
             sessions.value.push({
               id: newId,
-              name: `对话 ${sessions.value.length + 1}`,
+              name: getUniqueSessionTitle(baseName),
               messages: [],
+              inferenceParams: getDefaultInferenceParams(),
+              preset: 'balanced',
             });
             currentSessionId.value = newId;
             saveLastActiveSessionId(newId);
@@ -1643,7 +1862,8 @@
             if (editingSessionId.value) {
               const session = sessions.value.find((s) => s.id === editingSessionId.value);
               if (session) {
-                session.name = editingSessionName.value.trim() || '未命名对话';
+                const requestedTitle = editingSessionName.value.trim() || '未命名对话';
+                session.name = getUniqueSessionTitle(requestedTitle, session.id);
               }
               editingSessionId.value = null;
             }
@@ -1675,6 +1895,7 @@
             if (currentSession.value) {
               currentSession.value.messages = [];
               currentSession.value.systemPrompt = '';
+              ensureSessionInferenceState(currentSession.value);
               // Force an immediate save to database to guarantee clear persists
               const sessionsClone = JSON.parse(JSON.stringify(sessions.value));
               saveToIndexedDB(sessionsClone).catch((err) => {
@@ -2037,8 +2258,10 @@
             Object.assign(config, parsed);
             // Auto-override the API base to match the current host if accessed over network
             autoConfigureAPI();
-            // Also clamp max_tokens if needed
-            params.max_tokens = Math.min(params.max_tokens, config.maxModelLen);
+            // Also clamp max_tokens if needed (session-aware)
+            normalizeAllSessionsInferenceState();
+            syncParamsFromSession(currentSession.value);
+            persistCurrentSessionParams();
             initialized.value = true;
           };
 
@@ -2072,7 +2295,9 @@
                     config.model = modelInfo.id || 'qwen';
                     if (modelInfo.max_model_len) {
                       config.maxModelLen = modelInfo.max_model_len;
-                      params.max_tokens = Math.min(params.max_tokens, config.maxModelLen);
+                      normalizeAllSessionsInferenceState();
+                      syncParamsFromSession(currentSession.value);
+                      persistCurrentSessionParams();
                     }
                     initialized.value = true;
                     connectionSuccess = true;
@@ -2137,12 +2362,14 @@
 
             if (loadedSessions && Array.isArray(loadedSessions) && loadedSessions.length > 0) {
               sessions.value = loadedSessions;
+              normalizeAllSessionsInferenceState();
               const lastActiveId = loadLastActiveSessionId();
               const matchedSession = lastActiveId
-                ? loadedSessions.find((session) => session.id === lastActiveId)
+                ? sessions.value.find((session) => session.id === lastActiveId)
                 : null;
               currentSessionId.value = matchedSession ? matchedSession.id : loadedSessions.at(-1).id;
               saveLastActiveSessionId(currentSessionId.value);
+              syncParamsFromSession(currentSession.value);
             }
 
             resetVisibleWindowToLatest();
@@ -3027,6 +3254,12 @@
             onParamChange,
             sidebarOpen,
             settingsOpen,
+            debouncedParamDisplay,
+            settingsToggleRef,
+            settingsPanelRef,
+            settingsTitleRef,
+            toggleSettingsPanel,
+            closeSettingsPanel,
             currentSessionSystemPrompt,
             isSystemPromptLocked,
             updateSessionSystemPrompt,
