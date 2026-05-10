@@ -502,6 +502,32 @@
               </div>
             </label>
           </div>
+          <div
+            class="flex gap-4 items-center justify-between bg-gray-50 p-2 rounded-lg mb-2 border"
+          >
+            <span class="text-sm font-medium text-gray-700">仅首次加载时强制滚动</span>
+            <label class="flex items-center cursor-pointer">
+              <div class="relative">
+                <input
+                  type="checkbox"
+                  :checked="initialForceScrollEnabled"
+                  @change="setInitialForceScrollEnabled($event.target.checked)"
+                  class="sr-only"
+                />
+                <div
+                  class="block bg-blue-400 w-10 h-6 rounded-full transition-colors"
+                  :class="{'bg-blue-200': initialForceScrollEnabled}"
+                ></div>
+                <div
+                  class="dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform"
+                  :class="{'transform translate-x-4': initialForceScrollEnabled}"
+                ></div>
+              </div>
+            </label>
+          </div>
+          <p class="text-[10px] text-gray-400 mt-1 mb-2 px-1">
+            仅页面初次恢复历史时生效，不影响会话切换。
+          </p>
           <button
             @click="clearCurrentChat"
             class="w-full bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 px-3 py-2 rounded text-sm font-semibold transition-colors mb-2"
@@ -1198,6 +1224,53 @@
           // Session Management
           const generateId = () => Math.random().toString(36).substr(2, 9);
           const STORAGE_KEY = 'qwen_vllm_sessions';
+          const LAST_SESSION_KEY = 'qwen_last_active_session';
+          const INITIAL_FORCE_SCROLL_KEY = 'qwen_initial_force_scroll_enabled';
+
+          const loadInitialForceScrollPreference = () => {
+            try {
+              const raw = localStorage.getItem(INITIAL_FORCE_SCROLL_KEY);
+              if (raw === null) return true;
+              return raw === 'true';
+            } catch (e) {
+              console.warn('Failed to load initial force scroll preference', e);
+              return true;
+            }
+          };
+
+          const initialForceScrollEnabled = ref(loadInitialForceScrollPreference());
+          const hasUserInteractedWithScroll = ref(false);
+
+          const persistInitialForceScrollPreference = (enabled) => {
+            try {
+              localStorage.setItem(INITIAL_FORCE_SCROLL_KEY, enabled ? 'true' : 'false');
+            } catch (e) {
+              console.warn('Failed to persist initial force scroll preference', e);
+            }
+          };
+
+          const setInitialForceScrollEnabled = (enabled) => {
+            initialForceScrollEnabled.value = !!enabled;
+            persistInitialForceScrollPreference(initialForceScrollEnabled.value);
+          };
+
+          const saveLastActiveSessionId = (sessionId) => {
+            if (!sessionId) return;
+            try {
+              localStorage.setItem(LAST_SESSION_KEY, sessionId);
+            } catch (e) {
+              console.warn('Failed to persist last active session id', e);
+            }
+          };
+
+          const loadLastActiveSessionId = () => {
+            try {
+              return localStorage.getItem(LAST_SESSION_KEY);
+            } catch (e) {
+              console.warn('Failed to load last active session id', e);
+              return null;
+            }
+          };
           // IndexedDB Wrapper for unlimited storage
           const initDB = () => {
             return new Promise((resolve, reject) => {
@@ -1401,12 +1474,14 @@
               messages: [],
             });
             currentSessionId.value = newId;
+            saveLastActiveSessionId(newId);
           };
 
           const switchSession = (id) => {
             if (isGenerating.value) return; // Prevent switching while generating
             if (editingSessionId.value === id) return; // Prevent switch logic if editing this session
             currentSessionId.value = id;
+            saveLastActiveSessionId(id);
             scrollToBottom();
           };
 
@@ -1442,6 +1517,7 @@
               // If we deleted the currently active session, switch to a nearby one
               if (currentSessionId.value === id) {
                 currentSessionId.value = sessions.value[Math.max(0, index - 1)].id;
+                saveLastActiveSessionId(currentSessionId.value);
               }
 
               // Force an immediate save to database to guarantee deletion persists
@@ -1667,6 +1743,7 @@
           // Throttled scroll handler to update active dot and auto-scroll state
           let scrollTimeout;
           const handleScroll = () => {
+            hasUserInteractedWithScroll.value = true;
             if (scrollTimeout) return;
             scrollTimeout = setTimeout(() => {
               updateActiveMessageIndex();
@@ -1683,6 +1760,26 @@
 
               scrollTimeout = null;
             }, 100);
+          };
+
+          const runInitialScrollCalibration = async () => {
+            if (!initialForceScrollEnabled.value) return;
+            if (hasUserInteractedWithScroll.value) return;
+
+            autoScrollEnabled.value = true;
+            await scrollToBottom(true);
+
+            const guardedCalibrate = (delayMs) => {
+              window.setTimeout(() => {
+                if (!initialForceScrollEnabled.value) return;
+                if (hasUserInteractedWithScroll.value) return;
+                if (!autoScrollEnabled.value) return;
+                scrollToBottom(true);
+              }, delayMs);
+            };
+
+            guardedCalibrate(100);
+            guardedCalibrate(260);
           };
 
           const updateActiveMessageIndex = () => {
@@ -1807,6 +1904,7 @@
           // Load data asynchronously on mount
           onMounted(async () => {
             fetchLogAutomatically();
+            hasUserInteractedWithScroll.value = false;
 
             // Try loading from IndexedDB first (huge capacity)
             let loadedSessions = await loadFromIndexedDB();
@@ -1827,8 +1925,15 @@
 
             if (loadedSessions && Array.isArray(loadedSessions) && loadedSessions.length > 0) {
               sessions.value = loadedSessions;
-              currentSessionId.value = loadedSessions[0].id;
+              const lastActiveId = loadLastActiveSessionId();
+              const matchedSession = lastActiveId
+                ? loadedSessions.find((session) => session.id === lastActiveId)
+                : null;
+              currentSessionId.value = matchedSession ? matchedSession.id : loadedSessions[0].id;
+              saveLastActiveSessionId(currentSessionId.value);
             }
+
+            await runInitialScrollCalibration();
           });
 
           const MARKDOWN_RENDER_INTERVAL_MS = 70;
@@ -2529,6 +2634,8 @@
             isTextareaExpanded,
             toggleTextareaExpand,
             multiTurn,
+            initialForceScrollEnabled,
+            setInitialForceScrollEnabled,
             sessions,
             currentSessionId,
             editingSessionId,
