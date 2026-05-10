@@ -584,7 +584,10 @@
               <input
                 type="number"
                 v-model.number="params.max_tokens"
-                @input="onParamChange"
+                @change="onMaxTokensCommit"
+                @blur="onMaxTokensCommit"
+                min="1"
+                :max="config.maxModelLen"
                 class="w-full border rounded px-2 py-1.5 text-sm"
                 :disabled="activePreset !== 'custom'"
               />
@@ -1111,7 +1114,7 @@
           const config = reactive({
             apiBase: '', // Will be auto-determined based on current hostname
             model: 'qwen',
-            maxModelLen: 8192,
+            maxModelLen: 65536,
             apiKey: '',
           });
 
@@ -1302,9 +1305,27 @@
             persistCurrentSessionParams();
           };
 
+          const onMaxTokensCommit = () => {
+            const session = currentSession.value;
+            const fallbackMaxTokens =
+              session && session.inferenceParams && Number.isFinite(session.inferenceParams.max_tokens)
+                ? session.inferenceParams.max_tokens
+                : getDefaultInferenceParams().max_tokens;
+
+            const parsed = Number(params.max_tokens);
+            const normalized =
+              Number.isFinite(parsed) && parsed > 0
+                ? Math.floor(parsed)
+                : fallbackMaxTokens;
+
+            params.max_tokens = Math.max(1, Math.min(config.maxModelLen, normalized));
+            onParamChange();
+          };
+
           const multiTurn = ref(true);
           const inputPrompt = ref('');
           const isGenerating = ref(false);
+          const isRequestDispatching = ref(false);
           const chatContainer = ref(null);
           const composerTextarea = ref(null);
           const activeMessageIndex = ref(-1);
@@ -2803,6 +2824,20 @@
             const validParams = validateParams({ ...params, max_model_len: config.maxModelLen });
             let chatMessages = [];
 
+            const isSameMessageContent = (left, right) => {
+              if (typeof left === 'string' && typeof right === 'string') {
+                return left === right;
+              }
+              if (Array.isArray(left) && Array.isArray(right)) {
+                try {
+                  return JSON.stringify(left) === JSON.stringify(right);
+                } catch (e) {
+                  return false;
+                }
+              }
+              return false;
+            };
+
             if (multiTurn.value) {
               // filter out errors and the currently generating empty assistant message
               chatMessages = messages.value
@@ -2866,7 +2901,17 @@
               currentContent = promptStr;
             }
 
-            chatMessages.push({ role: 'user', content: currentContent });
+            const lastHistoryMessage = chatMessages[chatMessages.length - 1];
+            const shouldAppendCurrentMessage = !(
+              multiTurn.value &&
+              lastHistoryMessage &&
+              lastHistoryMessage.role === 'user' &&
+              isSameMessageContent(lastHistoryMessage.content, currentContent)
+            );
+
+            if (shouldAppendCurrentMessage) {
+              chatMessages.push({ role: 'user', content: currentContent });
+            }
 
             return {
               model: config.model,
@@ -2880,8 +2925,9 @@
           let reconnectInterval = null;
 
           const performRequest = async (promptStr, mediaItems = [], msgIndexToRetry = null) => {
-            if (isGenerating.value) return;
+            if (isGenerating.value || isRequestDispatching.value) return;
 
+            isRequestDispatching.value = true;
             isGenerating.value = true;
             abortController = new AbortController();
 
@@ -3077,6 +3123,7 @@
               }
 
               isGenerating.value = false;
+              isRequestDispatching.value = false;
               abortController = null;
               scrollToBottom();
             }
@@ -3168,6 +3215,8 @@
           });
 
           const sendMessage = () => {
+            if (isGenerating.value || isRequestDispatching.value) return;
+
             const prompt = inputPrompt.value.trim();
             const mediaItems = [...pendingMedia.value]; // Copy current pending media
 
@@ -3252,6 +3301,7 @@
             activePreset,
             applyPreset,
             onParamChange,
+            onMaxTokensCommit,
             sidebarOpen,
             settingsOpen,
             debouncedParamDisplay,

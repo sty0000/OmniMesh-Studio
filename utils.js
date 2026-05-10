@@ -7,7 +7,7 @@ function parseServiceLog(logText) {
   const config = {
     apiBase: 'http://localhost:8000/v1', // default via SSH port forwarding
     model: 'qwen', // default
-    maxModelLen: 8192,
+    maxModelLen: 65536,
     apiKey: '',
   };
 
