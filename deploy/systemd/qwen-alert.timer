@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Qwen Gateway Alert Check Every Minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+Persistent=true
+Unit=qwen-alert.service
+
+[Install]
+WantedBy=timers.target
+

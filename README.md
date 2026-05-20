@@ -1,100 +1,223 @@
-# Qwen vLLM Web Client
+# Qwen vLLM Web Client（运维增强版）
 
-这是一个专为 Qwen (特别是 Qwen3-Omni-Thinking 等多模态强推理模型) 打造的纯静态、高性能本地 Web 客户端。它支持流式打字机输出、思考过程折叠、多模态输入（图片/视频/音频上传与麦克风录音）、多对话并发管理以及基于 IndexedDB 的无限容量本地历史记录存储。
+本仓库现在提供一套可长期维护的内网部署方案：
 
-## 如何部署与使用 (适合团队共享)
+- `qwen-vllm.service`：模型推理服务（vLLM）
+- `qwen-gateway.service`：统一接入层（Web 静态托管 + OpenAI 兼容 API）
+- `qwen-alert.timer`：每分钟采集指标并按阈值告警
 
-为了让团队中的其他人也能轻松使用这个客户端，请按照以下步骤在您的 Linux 服务器（如 DRX Spark）上进行部署和重启服务。我们提供**内网直接访问**和**SSH端口转发**两种方式。
+> 目标：单机单实例（20-50 并发）稳定运行，具备自愈、可观测、可回滚能力。
 
-### 1. 准备代码与启动脚本
+---
 
-确保您的服务器上有一个专门的目录存放这些文件（例如 `~/qwen-web-client`）。将本项目的 `index.html`, `utils.js` 等文件放入其中。
+## 1. 目录与约定
 
-同时，确保您的启动脚本（如 `start_vllm.sh`）也放在同级目录，或者能在该目录下执行。
-**注意**：为了支持音频输入，请确保您的脚本中 `--limit-mm-per-prompt` 参数包含了 `audio`（如：`'{"image":2,"video":1,"audio":1}'`）。
+推荐线上目录：
 
-另外，为了让局域网内其他机器能访问 vLLM API，您的 vLLM 启动参数 `--host` 必须设置为 `0.0.0.0`（如果脚本里没有写，默认就是 0.0.0.0）。
+- 代码：`/opt/qwen-web`
+- 配置：`/etc/qwen-web/*.env`
+- 日志：`/var/log/qwen-web/*.log`
 
-### 2. 重启 vLLM 服务
+仓库内对应资产：
 
-如果之前有旧的 vLLM 服务在运行，需要先将其停止：
+- systemd 模板：`deploy/systemd/`
+- 环境变量模板：`deploy/env/`
+- 日志轮转模板：`deploy/logrotate/qwen-web`
+- 运维脚本：`ops/`
 
-```bash
-# 查找正在运行的 vLLM 进程
-ps aux | grep vllm.entrypoints.openai.api_server
+---
 
-# 杀掉对应的进程 (替换 PID 为实际进程号)
-kill -9 <PID>
-
-# 重新运行您的启动脚本 (它会自动在后台运行并监听 8000 端口)
-bash start_vllm.sh
-```
-
-### 3. 启动前端静态文件服务 (监听全网)
-
-为了让前端能被内网访问，我们需要在这个目录下启动一个轻量级的 Web 服务器，并确保它绑定到 `0.0.0.0`。
+## 2. 首次安装（systemd）
 
 ```bash
-# 在存放 index.html 的目录下执行：
-nohup python3 -m http.server 3000 --bind 0.0.0.0 > frontend.log 2>&1 &
+cd qwen-vllm-web-client
+chmod +x ops/*.sh
+sudo bash ops/install_systemd.sh
 ```
 
-### 4. 团队成员如何访问
+安装完成后会自动：
 
-现在，服务已经在服务器上跑起来了（vLLM 在 8000 端口，前端在 3000 端口）。假设您的服务器在局域网内的 IP 是 `192.168.1.100`。
+1. 同步代码到 `/opt/qwen-web`
+2. 安装 systemd 单元到 `/etc/systemd/system/`
+3. 初始化配置文件（若不存在）到 `/etc/qwen-web/`
+4. `daemon-reload` 并 `enable` 服务
 
-#### 方式一：内网直接访问（最简单，推荐）
+然后编辑配置：
 
-如果大家都在同一个公司内网，或者连着同一个路由器/VPN：
+- `/etc/qwen-web/vllm.env`
+- `/etc/qwen-web/gateway.env`
+- `/etc/qwen-web/alert.env`（如需告警）
 
-1. 团队成员直接在自己电脑的浏览器中打开：
-   👉 **http://192.168.1.100:3000**
-2. **零配置体验**：得益于最新的前端自适应机制，打开页面后无需做任何配置，系统会自动将 API 指向当前访问的 IP，**直接输入问题点击发送即可！**
-
-_(注意：内网访问需要确保服务器的防火墙（如 `ufw` 或 `iptables`）放行了 3000 和 8000 端口。)_
-
-#### 方式二：通过 SSH 端口转发（最安全，适合跨网或防火墙受限）
-
-如果不在同一内网，或者服务器防火墙封闭了端口，团队成员可以使用 SSH：
+最后启动：
 
 ```bash
-# 在成员自己的电脑终端执行：
-ssh -L 8000:localhost:8000 -L 3000:localhost:3000 user@192.168.1.100
+bash /opt/qwen-web/ops/start.sh
 ```
 
-建立隧道后，在浏览器访问 👉 **http://localhost:3000** 即可。
+---
 
-### 多人并发支持说明
+## 3. 服务启停与发布
 
-- **完全独立的历史记录**：所有的对话记录、设置、预设词都保存在每个成员各自浏览器的 `IndexedDB` 数据库中。甲的聊天记录绝对不会出现在乙的电脑上。
-- **并发推理能力**：多个人可以**同时**向 Qwen3 模型提问。由于您开启了 `vLLM` 框架，vLLM 拥有强大的 `Continuous Batching`（连续批处理）能力，它会自动将多人的请求打包进 GPU 并行计算，完全支持团队级别的并发使用。
+### 常用命令
 
-## 开发与测试
+```bash
+bash /opt/qwen-web/ops/start.sh
+bash /opt/qwen-web/ops/stop.sh
+bash /opt/qwen-web/ops/restart.sh
+bash /opt/qwen-web/ops/status.sh
+```
 
-本项目提供了完整的单元测试（Vitest）和代码规范检查（ESLint + Prettier）。
+### 单实例滚动发布（带回滚）
 
-### 安装依赖
+```bash
+sudo bash /opt/qwen-web/ops/rollout.sh
+```
+
+`rollout.sh` 流程：
+
+1. 预检上游就绪状态
+2. 备份当前版本到 `/opt/qwen-web-backups/<timestamp>`
+3. 同步新代码
+4. 重启网关并探测 `/ready`
+5. 失败自动回滚上一版本并重新拉起
+
+---
+
+## 4. API 契约与访问
+
+统一入口（网关）：
+
+- Web：`http://<host>:3000`
+- API Base：`http://<host>:3000/v1`
+
+首期开放接口：
+
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+- `POST /v1/agent/tasks`（P6 最小 Agent 事件流链路）
+
+鉴权：
+
+```http
+Authorization: Bearer <TEAM_API_KEY>
+```
+
+接口访问边界：
+
+- 静态页面与静态资源：匿名可访问
+- `GET /health`：匿名可访问
+- `GET /ready`：仅本机或合法 Bearer
+- `GET /internal/metrics`：仅本机或合法 Bearer
+- `GET /v1/models`、`POST /v1/chat/completions`：默认必须 Bearer；仅显式演示模式例外
+
+支持双 Key 过渡（轮换窗口）：
+
+- 主 Key：`TEAM_API_KEY`
+- 过渡 Key 列表：`TEAM_API_KEYS_EXTRA`（逗号分隔）
+
+---
+
+## 5. 并发治理与安全基线
+
+`gateway.env` 关键项（默认已适配 20-50 并发）：
+
+- `RATE_LIMIT_RPS=5`
+- `RATE_LIMIT_BURST=10`
+- `MAX_CONCURRENT_PER_CLIENT=2`
+- `MAX_GLOBAL_INFLIGHT=32`
+- `MAX_QUEUE_SIZE=128`
+- `QUEUE_WAIT_MS=20000`
+- `UPSTREAM_TIMEOUT_MS=180000`
+
+安全建议：
+
+1. 仅对内开放 `3000`，限制普通用户直连 `8000`。
+2. 生产禁用弱口令 Key（默认 `change-me-in-production` 会被拒绝启动）。
+3. 如需本地调试弱口令，显式设置 `ALLOW_INSECURE_DEFAULT_KEY=true`。
+4. 默认 `ENABLE_WEB_AUTH_BYPASS=false`；仅在受控内网演示场景下，才建议临时开启同源网页免填 Key。
+
+---
+
+## 6. 监控与告警
+
+### 运行时接口
+
+- 健康：`GET /health`（网关存活，匿名）
+- 就绪：`GET /ready`（上游可用，仅本机或合法 Bearer）
+- 指标：`GET /internal/metrics`（仅本机或合法 Bearer）
+- 前端配置：`GET /frontend/config`（匿名最小只读配置）
+
+指标包含：
+
+- `totalApi5xx` / `totalUpstreamTimeout`
+- `rates.api5xxRatio` / `rates.api429Ratio`
+- `latencyMs.avg` / `latencyMs.p95`
+- `queue.currentContinuousMs` / `queue.peakSinceBoot`
+
+Web 默认访问策略：
+
+- 前端默认需要显式填写 `API Key`
+- 仅当服务端显式开启 `ENABLE_WEB_AUTH_BYPASS=true` 时，同源网页才允许免填 Key 访问已开放接口
+- 前端首屏先读取 `/frontend/config`，仅拿最小展示配置；只有显式填写 `API Key` 后，才会请求 `/v1/models` 拉取实时模型信息
+- `POST /v1/agent/tasks` 当前仅支持显式 Bearer，返回 SSE 事件流，用于最小单 Agent 任务链路验证
+
+前端当前采用：
+
+- 静态 HTML 入口：`index.html`
+- 原生 ES Modules：`frontend/app.js`
+- 职责拆分模块：`frontend/state.js`、`frontend/api.js`、`frontend/rendering.js`、`frontend/storage.js`
+- 无构建工具，继续由网关直接托管静态文件
+
+### 告警定时器
+
+启用后每分钟执行一次 `ops/alert_check.sh`：
+
+```bash
+sudo systemctl enable --now qwen-alert.timer
+```
+
+`alert.env` 默认阈值：
+
+- `THRESHOLD_API_429_RATIO=0.05`
+- `THRESHOLD_API_5XX_RATIO=0.01`
+- `THRESHOLD_QUEUE_CONTINUOUS_MS=300000`
+- `HEALTH_FAIL_THRESHOLD=3`
+
+---
+
+## 7. 日志与排障
+
+### journald
+
+```bash
+sudo journalctl -u qwen-vllm.service -f
+sudo journalctl -u qwen-gateway.service -f
+```
+
+### logrotate
+
+将模板安装到系统：
+
+```bash
+sudo cp /opt/qwen-web/deploy/logrotate/qwen-web /etc/logrotate.d/qwen-web
+```
+
+---
+
+## 8. Key 轮换标准流程
+
+1. 新 Key 写入 `TEAM_API_KEYS_EXTRA`（保留旧主 Key）
+2. 客户端逐步切新 Key
+3. 切换 `TEAM_API_KEY` 为新值
+4. 清空旧 Key（从 `TEAM_API_KEYS_EXTRA` 移除）
+5. `sudo systemctl restart qwen-gateway.service`
+
+---
+
+## 9. 本地开发
 
 ```bash
 npm install
-```
-
-### 运行测试 (覆盖率 >= 80%)
-
-```bash
+npm run lint
 npm run test
 ```
-
-### 代码格式化与检查
-
-```bash
-npm run lint
-npm run format
-```
-
-## 技术栈
-
-- Vue 3 (CDN)
-- Tailwind CSS (CDN)
-- Marked.js (CDN, 用于 Markdown 渲染)
-- Vitest (单元测试)

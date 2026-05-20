@@ -89,7 +89,7 @@ async function* parseSSE(body) {
         try {
           const data = JSON.parse(dataStr);
           yield data;
-        } catch (e) {
+        } catch {
           console.warn('Failed to parse SSE line:', line);
         }
       }
@@ -103,7 +103,7 @@ async function* parseSSE(body) {
       try {
         const data = JSON.parse(dataStr);
         yield data;
-      } catch (e) {
+      } catch {
         console.warn('Failed to parse SSE buffer:', buffer);
       }
     }

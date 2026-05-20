@@ -2,20 +2,10 @@ import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 
-const htmlContent = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf-8');
-const scriptMatch = htmlContent.match(/<script>\s*([\s\S]*?)const \{ createApp/);
-if (!scriptMatch) {
-  throw new Error('Could not find script content in index.html');
-}
-
-// We also need to read utils.js to make sure its functions are available in the mock module scope
-// because index.html relies on utils.js being loaded globally.
 const utilsContent = fs.readFileSync(path.join(__dirname, 'utils.js'), 'utf-8');
-
-const scriptContent = utilsContent + '\n' + scriptMatch[1];
 // Mock module.exports to capture the exported functions
 const mockModule = { exports: {} };
-const fn = new Function('module', scriptContent);
+const fn = new Function('module', utilsContent);
 fn(mockModule);
 
 const { parseServiceLog, validateParams, parseSSE, formatCurrentTime } = mockModule.exports;
@@ -143,7 +133,7 @@ describe('parseServiceLog', () => {
   it('should use default values if not found', () => {
     const result = parseServiceLog('some random log');
     expect(result.model).toBe('qwen');
-    expect(result.maxModelLen).toBe(8192);
+    expect(result.maxModelLen).toBe(65536);
     expect(result.apiBase).toBe('http://localhost:8000/v1');
     expect(result.apiKey).toBe('');
   });

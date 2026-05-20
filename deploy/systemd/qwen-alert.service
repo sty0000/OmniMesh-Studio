@@ -1,0 +1,11 @@
+[Unit]
+Description=Qwen Gateway Metrics Alert Check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/qwen-web
+EnvironmentFile=/etc/qwen-web/alert.env
+ExecStart=/bin/bash /opt/qwen-web/ops/alert_check.sh
+

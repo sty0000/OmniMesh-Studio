@@ -1,0 +1,19 @@
+[Unit]
+Description=Qwen Web Gateway
+After=network-online.target qwen-vllm.service
+Wants=network-online.target qwen-vllm.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/qwen-web
+EnvironmentFile=/etc/qwen-web/gateway.env
+ExecStartPre=/bin/bash -lc 'test -f /etc/qwen-web/gateway.env'
+ExecStart=/usr/bin/node /opt/qwen-web/gateway.server.js
+Restart=always
+RestartSec=3
+TimeoutStartSec=30
+TimeoutStopSec=20
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
