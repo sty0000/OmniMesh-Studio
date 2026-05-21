@@ -1,5 +1,7 @@
 # Qwen vLLM Web Client（运维增强版）
 
+> 当前唯一推荐的长期运行方式：用 `systemd` 持久化托管，并通过 `sudo bash ops/restart_persistent.sh` 完成“停止旧进程 → 同步服务资产 → 从头重启”。不要继续使用 `node gateway.server.js` 或 `nohup ...` 作为长期运行方案。
+
 本仓库现在提供一套可长期维护的内网部署方案：
 
 - `qwen-vllm.service`：模型推理服务（vLLM）
@@ -54,9 +56,172 @@ sudo bash ops/install_systemd.sh
 bash /opt/qwen-web/ops/start.sh
 ```
 
+如果是“从头重启并切换到持久化启动”，建议直接看下一节，优先使用一键脚本。
+
 ---
 
-## 3. 从手工启动切换到持久化启动
+## 3. 推荐重启方式：停止旧服务后，用 `systemd` 从头启动
+
+最推荐的执行方式：
+
+```bash
+cd qwen-vllm-web-client
+chmod +x ops/*.sh
+sudo bash ops/restart_persistent.sh
+```
+
+这个脚本会按固定顺序执行：
+
+1. 停掉现有 `systemd` 服务
+2. 清理仍占用 `3000/8000` 的旧手工进程
+3. 重新同步代码和 `systemd` 单元到目标目录
+4. 保留并继续使用 `/etc/qwen-web/*.env`
+5. 重新启动服务并打印状态
+
+如果端口被“非本项目进程”占用，脚本会拒绝自动 `kill`，避免误杀其他服务；这时按提示手工处理后再重跑即可。
+
+如果你现在怀疑服务状态已经混乱，或者之前用过：
+
+```bash
+node gateway.server.js
+./start_gateway.sh
+nohup node gateway.server.js ...
+python -m vllm.entrypoints.openai.api_server ...
+```
+
+那么最稳妥的做法不是“在原进程上补救”，而是统一执行上面的脚本。
+
+### 一键步骤
+
+```bash
+cd qwen-vllm-web-client
+chmod +x ops/*.sh
+sudo bash ops/restart_persistent.sh
+```
+
+### 脚本内部等价流程
+
+1. 找到并停止旧的手工进程
+2. 清理端口占用
+3. 重新安装/同步 `systemd` 资产
+4. 用 `/etc/qwen-web/*.env` 作为唯一配置来源
+5. 通过 `systemd` 重新拉起服务
+
+这样做的好处是：
+
+- 退出 SSH 或关闭终端后服务不会丢
+- 机器重启后服务能自动恢复
+- 配置固定保存在 `/etc/qwen-web/*.env`
+- 启停方式统一为 `start / stop / restart / status`
+- 故障排查统一走 `systemctl` 和 `journalctl`
+
+### 手工分步执行（仅在你想逐步排查时）
+
+#### 第 1 步：停止旧进程
+
+先检查 `3000` 和 `8000` 是否还被旧进程占用：
+
+```bash
+ss -ltnp | grep ':3000\|:8000'
+```
+
+如果看到了旧的 `node` 或 `python` 进程，先停止它们：
+
+```bash
+kill <旧网关PID>
+kill <旧vllm PID>
+```
+
+如仍未退出，再强制停止：
+
+```bash
+kill -9 <PID>
+```
+
+如果之前已经装过 `systemd` 服务，也建议先停掉一次，确保干净：
+
+```bash
+sudo systemctl stop qwen-gateway.service qwen-vllm.service qwen-alert.timer
+```
+
+#### 第 2 步：重新安装/同步持久化启动资产
+
+在仓库目录执行：
+
+```bash
+cd qwen-vllm-web-client
+chmod +x ops/*.sh
+sudo bash ops/install_systemd.sh
+```
+
+这个脚本会做几件事：
+
+1. 把当前代码同步到 `/opt/qwen-web`
+2. 把 `systemd` 单元安装到 `/etc/systemd/system/`
+3. 如果配置文件还不存在，就初始化到 `/etc/qwen-web/`
+4. 执行 `systemctl daemon-reload`
+5. 执行 `systemctl enable ...`，保证开机自启
+
+#### 第 3 步：确认持久化配置
+
+重点检查下面两个文件：
+
+```bash
+sudo vim /etc/qwen-web/vllm.env
+sudo vim /etc/qwen-web/gateway.env
+```
+
+至少要确认这些值是对的：
+
+- `/etc/qwen-web/vllm.env` 的 `MODEL_PATH`
+- `/etc/qwen-web/vllm.env` 的 `SERVED_MODEL_NAME`
+- `/etc/qwen-web/vllm.env` 的 `PYTHON_BIN`（如 vLLM 在 venv / conda 中）
+- `/etc/qwen-web/gateway.env` 的 `TEAM_API_KEY`
+- `/etc/qwen-web/gateway.env` 的 `WEB_ROOT=/opt/qwen-web`
+- `/etc/qwen-web/gateway.env` 的 `VLLM_BASE=http://127.0.0.1:8000`
+
+如果你要启用告警，再检查：
+
+```bash
+sudo vim /etc/qwen-web/alert.env
+```
+
+#### 第 4 步：从头启动持久化服务
+
+```bash
+bash /opt/qwen-web/ops/start.sh
+```
+
+如果你只是修改了配置并想重新加载，也可以用：
+
+```bash
+bash /opt/qwen-web/ops/restart.sh
+```
+
+#### 第 5 步：验证重启结果
+
+```bash
+bash /opt/qwen-web/ops/status.sh
+curl -s http://127.0.0.1:3000/health
+curl -s http://127.0.0.1:3000/ready
+curl -s http://127.0.0.1:3000/frontend/config
+curl -s http://127.0.0.1:3000/v1/models \
+  -H "Authorization: Bearer <TEAM_API_KEY>"
+```
+
+只要这些检查正常，后续就不要再手工执行：
+
+```bash
+node gateway.server.js
+./start_gateway.sh
+python -m vllm.entrypoints.openai.api_server ...
+```
+
+统一交给 `systemd` 管理。
+
+---
+
+## 4. 从手工启动切换到持久化启动
 
 如果你之前是直接在仓库目录里手工执行：
 
@@ -107,6 +272,7 @@ sudo vim /etc/qwen-web/alert.env
 其中至少确认：
 
 - `/etc/qwen-web/vllm.env` 中的 `MODEL_PATH`
+- `/etc/qwen-web/vllm.env` 中的 `PYTHON_BIN`（默认 `python3`，独立环境建议写绝对路径）
 - `/etc/qwen-web/gateway.env` 中的 `TEAM_API_KEY`
 - `/etc/qwen-web/gateway.env` 中的 `VLLM_BASE=http://127.0.0.1:8000`
 
@@ -131,7 +297,24 @@ curl -s http://127.0.0.1:3000/v1/models \
 
 ---
 
-## 4. 服务启停与发布
+## 5. 服务启停与发布
+
+### 推荐恢复命令
+
+当你不确定当前机器上是否还残留了旧的 `nohup` / 手工 `node` / 手工 `python -m vllm ...` 进程时，优先执行：
+
+```bash
+cd qwen-vllm-web-client
+sudo bash ops/restart_persistent.sh
+```
+
+这是默认恢复动作，适用于：
+
+- 首次切换到持久化启动
+- 手工调试后想回到受控状态
+- 端口疑似被旧进程占用
+- 修改代码后想按标准方式重新拉起
+- 怀疑服务状态已经混乱
 
 ### 常用命令
 
@@ -158,7 +341,7 @@ sudo bash /opt/qwen-web/ops/rollout.sh
 
 ---
 
-## 5. API 契约与访问
+## 6. API 契约与访问
 
 统一入口（网关）：
 
@@ -192,7 +375,7 @@ Authorization: Bearer <TEAM_API_KEY>
 
 ---
 
-## 6. 并发治理与安全基线
+## 7. 并发治理与安全基线
 
 `gateway.env` 关键项（默认已适配 20-50 并发）：
 
@@ -213,7 +396,7 @@ Authorization: Bearer <TEAM_API_KEY>
 
 ---
 
-## 7. 监控与告警
+## 8. 监控与告警
 
 ### 运行时接口
 
@@ -260,13 +443,38 @@ sudo systemctl enable --now qwen-alert.timer
 
 ---
 
-## 8. 日志与排障
+## 9. 日志与排障
 
 ### journald
 
 ```bash
 sudo journalctl -u qwen-vllm.service -f
 sudo journalctl -u qwen-gateway.service -f
+```
+
+如果 `qwen-vllm.service` 反复重启且显示 `status=127`，通常表示 `systemd` 环境里找不到正确的 Python / vLLM 解释器，而不是模型本身有问题。优先检查：
+
+```bash
+sudo journalctl -u qwen-vllm.service -n 100 --no-pager
+python3 -V
+python3 -m vllm.entrypoints.openai.api_server --help
+```
+
+如果 vLLM 安装在 `venv` / `conda` 里，请在 `/etc/qwen-web/vllm.env` 里显式配置：
+
+```bash
+PYTHON_BIN=/opt/miniconda3/envs/vllm/bin/python
+MODEL_PATH=/path/to/model
+SERVED_MODEL_NAME=qwen
+```
+
+然后重新同步并重启：
+
+```bash
+cd qwen-vllm-web-client
+sudo bash ops/install_systemd.sh
+bash /opt/qwen-web/ops/restart.sh
+bash /opt/qwen-web/ops/status.sh
 ```
 
 ### logrotate
@@ -279,7 +487,7 @@ sudo cp /opt/qwen-web/deploy/logrotate/qwen-web /etc/logrotate.d/qwen-web
 
 ---
 
-## 9. Key 轮换标准流程
+## 10. Key 轮换标准流程
 
 1. 新 Key 写入 `TEAM_API_KEYS_EXTRA`（保留旧主 Key）
 2. 客户端逐步切新 Key
@@ -289,7 +497,7 @@ sudo cp /opt/qwen-web/deploy/logrotate/qwen-web /etc/logrotate.d/qwen-web
 
 ---
 
-## 10. 本地开发
+## 11. 本地开发
 
 ### 本地临时启动（仅开发调试）
 
@@ -304,7 +512,13 @@ export VLLM_BASE='http://127.0.0.1:8000'
 node gateway.server.js
 ```
 
-但这种方式不适合长期运行，也不会在机器重启后自动恢复。线上环境请优先使用上面的 `systemd` 持久化启动方式。
+或者：
+
+```bash
+./start_gateway.sh
+```
+
+但要注意，`start_gateway.sh` 本质上仍然是 `nohup` 后台启动，只适合临时调试，不适合长期运行，也不会像 `systemd` 那样提供统一的开机自启、重启恢复、状态管理和日志管理能力。线上环境请优先使用上面的 `systemd` 持久化启动方式。
 
 ```bash
 npm install
