@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Web UI for Qwen vLLM",
   "scripts": {
+    "gen:password": "node generate-password.js",
     "start:gateway": "node gateway.server.js",
     "test": "vitest run --coverage",
     "lint": "eslint . --ext .js,.html",

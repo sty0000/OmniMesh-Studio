@@ -56,7 +56,82 @@ bash /opt/qwen-web/ops/start.sh
 
 ---
 
-## 3. 服务启停与发布
+## 3. 从手工启动切换到持久化启动
+
+如果你之前是直接在仓库目录里手工执行：
+
+```bash
+node gateway.server.js
+python -m vllm.entrypoints.openai.api_server ...
+```
+
+建议切换到 `systemd` 托管，避免出现：
+
+- 退出 SSH 后进程丢失
+- 端口 `3000` / `8000` 被旧进程占用
+- 环境变量只在当前 shell 生效，重启后丢失
+- 无法统一使用 `start / stop / restart / status`
+
+### 迁移步骤
+
+1. 停掉旧的手工进程
+
+```bash
+ss -ltnp | grep ':3000\|:8000'
+kill <旧网关PID>
+kill <旧vllm PID>
+```
+
+如需强制停止：
+
+```bash
+kill -9 <PID>
+```
+
+2. 安装并启用 `systemd`
+
+```bash
+cd qwen-vllm-web-client
+chmod +x ops/*.sh
+sudo bash ops/install_systemd.sh
+```
+
+3. 编辑持久化环境变量文件
+
+```bash
+sudo vim /etc/qwen-web/vllm.env
+sudo vim /etc/qwen-web/gateway.env
+sudo vim /etc/qwen-web/alert.env
+```
+
+其中至少确认：
+
+- `/etc/qwen-web/vllm.env` 中的 `MODEL_PATH`
+- `/etc/qwen-web/gateway.env` 中的 `TEAM_API_KEY`
+- `/etc/qwen-web/gateway.env` 中的 `VLLM_BASE=http://127.0.0.1:8000`
+
+4. 通过 `systemd` 启动
+
+```bash
+bash /opt/qwen-web/ops/start.sh
+```
+
+5. 验证服务
+
+```bash
+bash /opt/qwen-web/ops/status.sh
+curl -s http://127.0.0.1:3000/health
+curl -s http://127.0.0.1:3000/ready
+curl -s http://127.0.0.1:3000/frontend/config
+curl -s http://127.0.0.1:3000/v1/models \
+  -H "Authorization: Bearer <TEAM_API_KEY>"
+```
+
+验证通过后，后续就不要再手工执行 `node gateway.server.js` 了，统一交给 `systemd` 管理。
+
+---
+
+## 4. 服务启停与发布
 
 ### 常用命令
 
@@ -83,7 +158,7 @@ sudo bash /opt/qwen-web/ops/rollout.sh
 
 ---
 
-## 4. API 契约与访问
+## 5. API 契约与访问
 
 统一入口（网关）：
 
@@ -117,7 +192,7 @@ Authorization: Bearer <TEAM_API_KEY>
 
 ---
 
-## 5. 并发治理与安全基线
+## 6. 并发治理与安全基线
 
 `gateway.env` 关键项（默认已适配 20-50 并发）：
 
@@ -138,7 +213,7 @@ Authorization: Bearer <TEAM_API_KEY>
 
 ---
 
-## 6. 监控与告警
+## 7. 监控与告警
 
 ### 运行时接口
 
@@ -185,7 +260,7 @@ sudo systemctl enable --now qwen-alert.timer
 
 ---
 
-## 7. 日志与排障
+## 8. 日志与排障
 
 ### journald
 
@@ -204,7 +279,7 @@ sudo cp /opt/qwen-web/deploy/logrotate/qwen-web /etc/logrotate.d/qwen-web
 
 ---
 
-## 8. Key 轮换标准流程
+## 9. Key 轮换标准流程
 
 1. 新 Key 写入 `TEAM_API_KEYS_EXTRA`（保留旧主 Key）
 2. 客户端逐步切新 Key
@@ -214,7 +289,22 @@ sudo cp /opt/qwen-web/deploy/logrotate/qwen-web /etc/logrotate.d/qwen-web
 
 ---
 
-## 9. 本地开发
+## 10. 本地开发
+
+### 本地临时启动（仅开发调试）
+
+如果你只是本机临时调试，可继续使用 shell 环境变量方式：
+
+```bash
+export TEAM_API_KEY='<your-team-key>'
+export GATEWAY_HOST=0.0.0.0
+export GATEWAY_PORT=3000
+export WEB_ROOT="$(pwd)"
+export VLLM_BASE='http://127.0.0.1:8000'
+node gateway.server.js
+```
+
+但这种方式不适合长期运行，也不会在机器重启后自动恢复。线上环境请优先使用上面的 `systemd` 持久化启动方式。
 
 ```bash
 npm install
