@@ -468,6 +468,24 @@ MODEL_PATH=/path/to/model
 SERVED_MODEL_NAME=qwen
 ```
 
+如果日志里出现：
+
+```bash
+api_server.py: error: argument --limit-mm-per-prompt: Value ...
+```
+
+说明 `LIMIT_MM_PER_PROMPT` 这个 JSON 参数写法不对，或被 shell 转义破坏了。建议在 `/etc/qwen-web/vllm.env` 中保持单引号包裹：
+
+```bash
+LIMIT_MM_PER_PROMPT='{"image":2,"video":1,"audio":1}'
+```
+
+如果当前模型并不需要多模态限制，也可以先临时置空：
+
+```bash
+LIMIT_MM_PER_PROMPT=
+```
+
 然后重新同步并重启：
 
 ```bash
