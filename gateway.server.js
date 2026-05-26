@@ -27,11 +27,29 @@ const MIME_TYPES = {
 
 const now = () => Date.now();
 
+const splitUpstreamBases = (value) =>
+  String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const normalizeUpstreamBase = (value) => {
+  const trimmed = String(value || '').trim();
+  return trimmed ? trimmed.replace(/\/+$/, '') : '';
+};
+
 const createGatewayConfig = (env = process.env) => ({
   host: env.GATEWAY_HOST || '0.0.0.0',
   port: Number(env.GATEWAY_PORT || 3000),
   webRoot: path.resolve(env.WEB_ROOT || __dirname),
-  vllmBase: env.VLLM_BASE || 'http://127.0.0.1:8000',
+  vllmBase: normalizeUpstreamBase(env.VLLM_BASE || 'http://127.0.0.1:8000'),
+  vllmBases: (() => {
+    const explicitBases = splitUpstreamBases(env.VLLM_BASES);
+    if (explicitBases.length > 0) {
+      return explicitBases.map(normalizeUpstreamBase);
+    }
+    return [normalizeUpstreamBase(env.VLLM_BASE || 'http://127.0.0.1:8000')];
+  })(),
   teamApiKey: env.TEAM_API_KEY || '',
   teamApiKeysExtra: String(env.TEAM_API_KEYS_EXTRA || '')
     .split(',')
@@ -117,6 +135,8 @@ const createGatewayServer = ({
   const clientInflight = new Map();
   const waitQueue = [];
   const requestLatencyRing = [];
+  const upstreamFailureUntil = new Map();
+  let upstreamCursor = 0;
 
   const recordApiOutcome = (statusCode) => {
     if (statusCode >= 200 && statusCode < 300) {
@@ -369,6 +389,32 @@ const createGatewayServer = ({
     });
   };
 
+  const getNextUpstreamBases = () => {
+    if (!config.vllmBases.length) return [];
+    const ordered = [];
+    const baseCount = config.vllmBases.length;
+    for (let index = 0; index < baseCount; index += 1) {
+      ordered.push(config.vllmBases[(upstreamCursor + index) % baseCount]);
+    }
+    upstreamCursor = (upstreamCursor + 1) % baseCount;
+    return ordered;
+  };
+
+  const isUpstreamTemporarilyUnavailable = (base) => {
+    const until = upstreamFailureUntil.get(base);
+    return Number.isFinite(until) && until > now();
+  };
+
+  const markUpstreamTemporarilyUnavailable = (base) => {
+    upstreamFailureUntil.set(base, now() + Math.max(5000, Math.min(config.upstreamTimeoutMs, 30000)));
+  };
+
+  const clearUpstreamFailure = (base) => {
+    upstreamFailureUntil.delete(base);
+  };
+
+  const getReadyUpstreams = () => config.vllmBases.filter((base) => !isUpstreamTemporarilyUnavailable(base));
+
   const handleProxyApi = async (req, res, pathname) => {
     metrics.totalApiRequests += 1;
     const requestStartMs = now();
@@ -431,24 +477,42 @@ const createGatewayServer = ({
 
     try {
       const query = req.url.includes('?') ? `?${req.url.split('?')[1]}` : '';
-      const upstreamUrl = new URL(pathname + query, config.vllmBase);
       const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
       const headers = buildForwardHeaders(req, authToUse, hasBody);
+      const body = hasBody ? await readRequestBody(req) : undefined;
+      const candidateBases = getNextUpstreamBases();
+      let lastError = null;
 
-      let body;
-      if (hasBody) {
-        body = await readRequestBody(req);
+      for (const base of candidateBases) {
+        if (isUpstreamTemporarilyUnavailable(base)) {
+          continue;
+        }
+
+        try {
+          const upstreamUrl = new URL(pathname + query, base);
+          const upstream = await fetchImpl(upstreamUrl, {
+            method: req.method,
+            headers,
+            body,
+            signal: AbortSignal.timeout(config.upstreamTimeoutMs),
+            duplex: hasBody ? 'half' : undefined,
+          });
+
+          if (upstream.ok) {
+            clearUpstreamFailure(base);
+          } else if (upstream.status >= 500) {
+            markUpstreamTemporarilyUnavailable(base);
+          }
+
+          pipeFetchResponse(upstream, res);
+          return;
+        } catch (err) {
+          lastError = err;
+          markUpstreamTemporarilyUnavailable(base);
+        }
       }
 
-      const upstream = await fetchImpl(upstreamUrl, {
-        method: req.method,
-        headers,
-        body,
-        signal: AbortSignal.timeout(config.upstreamTimeoutMs),
-        duplex: hasBody ? 'half' : undefined,
-      });
-
-      pipeFetchResponse(upstream, res);
+      throw lastError || new Error('Failed to reach vLLM upstream.');
     } catch (err) {
       if (err && err.name === 'TimeoutError') {
         metrics.totalUpstreamTimeout += 1;
@@ -593,22 +657,39 @@ const createGatewayServer = ({
     }
 
     try {
-      const upstreamUrl = new URL('/v1/models', config.vllmBase);
-      const upstream = await fetchImpl(upstreamUrl, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json',
-          'User-Agent': 'qwen-web-gateway/1.0',
-        },
-        signal: AbortSignal.timeout(config.upstreamTimeoutMs),
-      });
-
-      if (!upstream.ok) {
-        writeJson(res, 503, { ok: false, ready: false, error: 'upstream_not_ready' });
+      const readyUpstreams = getReadyUpstreams();
+      if (readyUpstreams.length === 0) {
+        writeJson(res, 503, { ok: false, ready: false, error: 'upstream_unreachable' });
         return;
       }
 
-      writeJson(res, 200, { ok: true, ready: true });
+      for (const base of readyUpstreams) {
+        try {
+          const upstreamUrl = new URL('/v1/models', base);
+          const upstream = await fetchImpl(upstreamUrl, {
+            method: 'GET',
+            headers: {
+              Accept: 'application/json',
+              'User-Agent': 'qwen-web-gateway/1.0',
+            },
+            signal: AbortSignal.timeout(config.upstreamTimeoutMs),
+          });
+
+          if (upstream.ok) {
+            clearUpstreamFailure(base);
+            writeJson(res, 200, { ok: true, ready: true, upstream: base });
+            return;
+          }
+
+          if (upstream.status >= 500) {
+            markUpstreamTemporarilyUnavailable(base);
+          }
+        } catch {
+          markUpstreamTemporarilyUnavailable(base);
+        }
+      }
+
+      writeJson(res, 503, { ok: false, ready: false, error: 'upstream_not_ready' });
     } catch {
       writeJson(res, 503, { ok: false, ready: false, error: 'upstream_unreachable' });
     }
@@ -776,7 +857,7 @@ const startGatewayServer = ({ env = process.env } = {}) => {
   server.listen(config.port, config.host, () => {
     console.log(`[Gateway] Listening on http://${config.host}:${config.port}`);
     console.log(`[Gateway] Web root: ${config.webRoot}`);
-    console.log(`[Gateway] vLLM upstream: ${config.vllmBase}`);
+    console.log(`[Gateway] vLLM upstream(s): ${config.vllmBases.join(', ')}`);
     console.log(`[Gateway] TEAM_API_KEY configured: ${Boolean(config.teamApiKey)}`);
     console.log(`[Gateway] TEAM_API_KEYS_EXTRA count: ${config.teamApiKeysExtra.length}`);
     console.log(`[Gateway] ENABLE_WEB_AUTH_BYPASS: ${config.enableWebAuthBypass}`);

@@ -396,150 +396,88 @@ Authorization: Bearer <TEAM_API_KEY>
 
 ---
 
-## 8. 监控与告警
+## 8. Dual-Node Deployment Modes
 
-### 运行时接口
+This project supports two dual-node patterns. Choose the one that matches the model size and service goal.
 
-- 健康：`GET /health`（网关存活，匿名）
-- 就绪：`GET /ready`（上游可用，仅本机或合法 Bearer）
-- 指标：`GET /internal/metrics`（仅本机或合法 Bearer）
-- 前端配置：`GET /frontend/config`（匿名最小只读配置）
+### 8.1 More throughput: replica mode with gateway round-robin
 
-指标包含：
+Use this when the current model fits on one machine and you want higher throughput or simple failover.
 
-- `totalApi5xx` / `totalUpstreamTimeout`
-- `rates.api5xxRatio` / `rates.api429Ratio`
-- `latencyMs.avg` / `latencyMs.p95`
-- `queue.currentContinuousMs` / `queue.peakSinceBoot`
+Recommended topology:
 
-Web 默认访问策略：
-
-- 前端默认需要显式填写 `API Key`
-- 仅当服务端显式开启 `ENABLE_WEB_AUTH_BYPASS=true` 时，同源网页才允许免填 Key 访问已开放接口
-- 前端首屏先读取 `/frontend/config`，仅拿最小展示配置；只有显式填写 `API Key` 后，才会请求 `/v1/models` 拉取实时模型信息
-- `POST /v1/agent/tasks` 当前仅支持显式 Bearer，返回 SSE 事件流，用于最小单 Agent 任务链路验证
-
-前端当前采用：
-
-- 静态 HTML 入口：`index.html`
-- 原生 ES Modules：`frontend/app.js`
-- 职责拆分模块：`frontend/state.js`、`frontend/api.js`、`frontend/rendering.js`、`frontend/storage.js`
-- 无构建工具，继续由网关直接托管静态文件
-
-### 告警定时器
-
-启用后每分钟执行一次 `ops/alert_check.sh`：
-
-```bash
-sudo systemctl enable --now qwen-alert.timer
+```text
+users -> b07b:qwen-gateway.service:3000
+      -> b07b:vLLM:8000
+      -> 7ace:vLLM:8000
 ```
 
-`alert.env` 默认阈值：
+Steps:
 
-- `THRESHOLD_API_429_RATIO=0.05`
-- `THRESHOLD_API_5XX_RATIO=0.01`
-- `THRESHOLD_QUEUE_CONTINUOUS_MS=300000`
-- `HEALTH_FAIL_THRESHOLD=3`
-
----
-
-## 9. 日志与排障
-
-### journald
+1. Run the same vLLM model service on both `b07b` and `7ace`.
+2. Set multiple upstreams in `/etc/qwen-web/gateway.env` on `b07b`:
 
 ```bash
-sudo journalctl -u qwen-vllm.service -f
-sudo journalctl -u qwen-gateway.service -f
+VLLM_BASES=http://127.0.0.1:8000,http://192.168.100.2:8000
 ```
 
-如果 `qwen-vllm.service` 反复重启且显示 `status=127`，通常表示 `systemd` 环境里找不到正确的 Python / vLLM 解释器，而不是模型本身有问题。优先检查：
+When `VLLM_BASES` is set, it overrides the single-upstream `VLLM_BASE`. The gateway round-robins requests across upstreams and temporarily skips an upstream when connection attempts fail or time out.
+
+3. Restart the gateway:
 
 ```bash
-sudo journalctl -u qwen-vllm.service -n 100 --no-pager
-python3 -V
-python3 -m vllm.entrypoints.openai.api_server --help
+sudo systemctl restart qwen-gateway.service
+curl -s http://127.0.0.1:3000/ready
 ```
 
-如果 vLLM 安装在 `venv` / `conda` 里，请在 `/etc/qwen-web/vllm.env` 里显式配置：
+Keep the same `--served-model-name` on both replicas so the frontend and API clients see a consistent model name.
+
+### 8.2 Larger-than-one-node model: vLLM + Ray model parallelism
+
+Use this when one machine cannot hold the model and both machines must serve one vLLM instance together.
+
+Recommended topology:
+
+```text
+users -> b07b:qwen-gateway.service:3000
+      -> b07b:vLLM:8000
+      -> Ray cluster: b07b + 7ace
+```
+
+Steps:
+
+1. Keep the dual-node data network fixed, for example:
+   - `b07b enp1s0f0np0 = 192.168.100.1/24`
+   - `7ace enp1s0f0np0 = 192.168.100.2/24`
+2. Start a Ray head on `b07b` and a Ray worker on `7ace`.
+3. Run only one API server on `b07b` via `qwen-vllm.service`.
+4. Add distributed vLLM arguments in `/etc/qwen-web/vllm.env`. Prefer pipeline parallelism first on two 1-GPU nodes:
 
 ```bash
-PYTHON_BIN=/opt/miniconda3/envs/vllm/bin/python
-MODEL_PATH=/path/to/model
-SERVED_MODEL_NAME=qwen
+EXTRA_VLLM_ARGS=--distributed-executor-backend ray --pipeline-parallel-size 2
 ```
 
-如果日志里出现：
+Or use tensor parallelism when the model and network path benefit from it:
 
 ```bash
-api_server.py: error: argument --limit-mm-per-prompt: Value ...
+EXTRA_VLLM_ARGS=--distributed-executor-backend ray --tensor-parallel-size 2
 ```
 
-说明 `LIMIT_MM_PER_PROMPT` 这个 JSON 参数写法不对，或被 shell 转义破坏了。建议在 `/etc/qwen-web/vllm.env` 中保持单引号包裹：
+5. Keep the gateway on one upstream:
 
 ```bash
-LIMIT_MM_PER_PROMPT='{"image":2,"video":1,"audio":1}'
+VLLM_BASE=http://127.0.0.1:8000
+VLLM_BASES=
 ```
 
-如果当前模型并不需要多模态限制，也可以先临时置空：
+6. Restart services:
 
 ```bash
-LIMIT_MM_PER_PROMPT=
+sudo systemctl restart qwen-vllm.service qwen-gateway.service
 ```
 
-然后重新同步并重启：
+### 8.3 Recommendation
 
-```bash
-cd qwen-vllm-web-client
-sudo bash ops/install_systemd.sh
-bash /opt/qwen-web/ops/restart.sh
-bash /opt/qwen-web/ops/status.sh
-```
-
-### logrotate
-
-将模板安装到系统：
-
-```bash
-sudo cp /opt/qwen-web/deploy/logrotate/qwen-web /etc/logrotate.d/qwen-web
-```
-
----
-
-## 10. Key 轮换标准流程
-
-1. 新 Key 写入 `TEAM_API_KEYS_EXTRA`（保留旧主 Key）
-2. 客户端逐步切新 Key
-3. 切换 `TEAM_API_KEY` 为新值
-4. 清空旧 Key（从 `TEAM_API_KEYS_EXTRA` 移除）
-5. `sudo systemctl restart qwen-gateway.service`
-
----
-
-## 11. 本地开发
-
-### 本地临时启动（仅开发调试）
-
-如果你只是本机临时调试，可继续使用 shell 环境变量方式：
-
-```bash
-export TEAM_API_KEY='<your-team-key>'
-export GATEWAY_HOST=0.0.0.0
-export GATEWAY_PORT=3000
-export WEB_ROOT="$(pwd)"
-export VLLM_BASE='http://127.0.0.1:8000'
-node gateway.server.js
-```
-
-或者：
-
-```bash
-./start_gateway.sh
-```
-
-但要注意，`start_gateway.sh` 本质上仍然是 `nohup` 后台启动，只适合临时调试，不适合长期运行，也不会像 `systemd` 那样提供统一的开机自启、重启恢复、状态管理和日志管理能力。线上环境请优先使用上面的 `systemd` 持久化启动方式。
-
-```bash
-npm install
-npm run lint
-npm run test
-```
+- If the model already fits on one Spark, use `VLLM_BASES` replica mode first.
+- If the model does not fit on one Spark, use Ray + vLLM model parallelism.
+- Before performance tuning, verify the data path with `OpenMPI + nccl-tests` and bind communication to `enp1s0f0np0`.

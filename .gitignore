@@ -1,13 +1,20 @@
-node_modules/
+﻿node_modules/
 dist/
 coverage/
+.nyc_output/
 .npm-cache/
 .env
 service_start_log.txt
 frontend.log
 vllm_server.log
 *.log
+*.log.*
 *.pid
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+*.tsbuildinfo
+.vscode-test/
 deploy/env/*.env
 
 doc/开发计划.md

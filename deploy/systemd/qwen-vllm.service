@@ -27,6 +27,10 @@ ExecStart=/bin/bash -lc '\
   if [[ -n "$${LIMIT_MM_PER_PROMPT:-}" ]]; then \
     ARGS+=(--limit-mm-per-prompt "$$LIMIT_MM_PER_PROMPT"); \
   fi; \
+  if [[ -n "$${EXTRA_VLLM_ARGS:-}" ]]; then \
+    read -r -a EXTRA_ARGS <<< "$$EXTRA_VLLM_ARGS"; \
+    ARGS+=("$${EXTRA_ARGS[@]}"); \
+  fi; \
   exec "$$PYTHON_BIN_RESOLVED" -m vllm.entrypoints.openai.api_server "$${ARGS[@]}" \
 '
 Restart=always

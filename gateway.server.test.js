@@ -73,6 +73,50 @@ describe('gateway.server P0 security hardening', () => {
     expect(fetchImpl.mock.calls[0][1].headers.Authorization).toBe('Bearer team-secret');
   });
 
+
+  it('round-robins across multiple vLLM upstreams', async () => {
+    const fetchImpl = vi.fn(async (url) => makeFetchResponse({ data: [{ id: String(url), max_model_len: 2048 }] }));
+    const { server, baseUrl } = await startServer({
+      env: {
+        VLLM_BASES: 'http://node-a:8000,http://node-b:8000',
+      },
+      fetchImpl,
+    });
+    servers.push(server);
+
+    await fetch(`${baseUrl}/v1/models`, { headers: { Authorization: 'Bearer team-secret' } });
+    await fetch(`${baseUrl}/v1/models`, { headers: { Authorization: 'Bearer team-secret' } });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(String(fetchImpl.mock.calls[0][0])).toBe('http://node-a:8000/v1/models');
+    expect(String(fetchImpl.mock.calls[1][0])).toBe('http://node-b:8000/v1/models');
+  });
+
+  it('fails over to the next vLLM upstream when one is unreachable', async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      if (String(url).startsWith('http://node-a:8000/')) {
+        throw new Error('connect ECONNREFUSED');
+      }
+      return makeFetchResponse({ data: [{ id: 'qwen-node-b', max_model_len: 2048 }] });
+    });
+    const { server, baseUrl } = await startServer({
+      env: {
+        VLLM_BASES: 'http://node-a:8000,http://node-b:8000',
+      },
+      fetchImpl,
+    });
+    servers.push(server);
+
+    const response = await fetch(`${baseUrl}/v1/models`, {
+      headers: { Authorization: 'Bearer team-secret' },
+    });
+
+    expect(response.status).toBe(200);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(String(fetchImpl.mock.calls[0][0])).toBe('http://node-a:8000/v1/models');
+    expect(String(fetchImpl.mock.calls[1][0])).toBe('http://node-b:8000/v1/models');
+  });
+
   it('rejects bypass when required same-origin headers are incomplete', async () => {
     const { server, baseUrl } = await startServer({
       env: { ENABLE_WEB_AUTH_BYPASS: 'true' },
@@ -206,7 +250,7 @@ describe('gateway.server P0 security hardening', () => {
 
     const response = await fetch(`${baseUrl}/ready`);
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true, ready: true });
+    await expect(response.json()).resolves.toMatchObject({ ok: true, ready: true });
   });
 
   it('returns 503 for /ready when upstream is unavailable', async () => {
