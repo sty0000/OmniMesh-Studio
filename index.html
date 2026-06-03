@@ -1,10 +1,10 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
   <head>
     <script>
       // 为不支持 .at() 的环境提供补丁
       if (!Array.prototype.at) {
-        Array.prototype.at = function(n) {
+        Array.prototype.at = function (n) {
           n = Math.trunc(n) || 0;
           if (n < 0) n += this.length;
           if (n < 0 || n >= this.length) return undefined;
@@ -395,10 +395,19 @@
           :class="settingsOpen ? 'translate-x-0' : 'translate-x-full'"
         >
           <div class="flex justify-between items-center border-b pb-2">
-            <h3 id="settings-sidebar-title" ref="settingsTitleRef" tabindex="-1" class="font-bold text-gray-700">
+            <h3
+              id="settings-sidebar-title"
+              ref="settingsTitleRef"
+              tabindex="-1"
+              class="font-bold text-gray-700"
+            >
               系统设置
             </h3>
-            <button @click="closeSettingsPanel" class="text-gray-400 hover:text-gray-600" title="关闭设置">
+            <button
+              @click="closeSettingsPanel"
+              class="text-gray-400 hover:text-gray-600"
+              title="关闭设置"
+            >
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
                   stroke-linecap="round"
@@ -562,7 +571,9 @@
                 class="w-full border rounded px-2 py-1.5 text-sm"
                 :disabled="activePreset !== 'custom'"
               />
-              <p class="text-[10px] text-gray-500 mt-0.5">当前显示值：{{ debouncedParamDisplay.max_tokens }}</p>
+              <p class="text-[10px] text-gray-500 mt-0.5">
+                当前显示值：{{ debouncedParamDisplay.max_tokens }}
+              </p>
               <p class="text-[10px] text-gray-400 mt-1">单次回复生成的最大Token数量。</p>
             </div>
           </div>
@@ -612,9 +623,7 @@
               </label>
             </div>
 
-            <p class="text-[10px] text-gray-400 px-1">
-              仅页面初次恢复历史时生效，不影响会话切换。
-            </p>
+            <p class="text-[10px] text-gray-400 px-1">仅页面初次恢复历史时生效，不影响会话切换。</p>
 
             <div class="flex gap-4 items-center justify-between bg-white p-2 rounded-lg border">
               <span class="text-sm font-medium text-gray-700">API 地址</span>
@@ -802,7 +811,10 @@
                     class="mt-3 text-red-500 text-sm font-semibold flex items-center gap-2"
                   >
                     <span>{{ msg.error }}</span>
-                    <button @click="retryMessage(visibleStartIndex + viewIndex)" class="underline hover:text-red-700">
+                    <button
+                      @click="retryMessage(visibleStartIndex + viewIndex)"
+                      class="underline hover:text-red-700"
+                    >
                       重试
                     </button>
                   </div>
@@ -892,55 +904,34 @@
         <div class="max-w-5xl mx-auto w-full">
           <!-- Media Preview Area -->
           <div v-if="pendingMedia.length > 0" class="flex flex-wrap gap-2 mb-3">
-            <div v-for="(media, idx) in pendingMedia" :key="idx" class="relative group">
+            <div v-for="(media, idx) in pendingMedia" :key="media.id || idx" class="relative group">
               <div
-                v-if="media.type === 'image'"
+                v-if="media.type === 'image' && media.url"
                 class="w-16 h-16 md:w-20 md:h-20 rounded-lg overflow-hidden border border-gray-200 shadow-sm"
               >
                 <img :src="media.url" class="w-full h-full object-cover" />
               </div>
               <div
-                v-else-if="media.type === 'video'"
-                class="w-16 h-16 md:w-20 md:h-20 rounded-lg overflow-hidden border border-gray-200 bg-black flex items-center justify-center shadow-sm"
+                v-else
+                class="w-16 h-16 md:w-20 md:h-20 rounded-lg overflow-hidden border border-gray-200 bg-blue-50 flex flex-col items-center justify-center shadow-sm px-1"
               >
-                <svg
-                  class="w-8 h-8 text-white"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
+                <span class="text-xl md:text-2xl mb-1"
+                  >{{ media.type === 'video' ? '🎬' : media.type === 'audio' ? '🎵' : media.type ===
+                  'file' ? '📄' : '⏳' }}</span
                 >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
-                  ></path>
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  ></path>
-                </svg>
+                <span class="text-[10px] text-blue-700 truncate max-w-full"
+                  >{{ media.name || media.type }}</span
+                >
+                <span class="text-[10px] text-gray-500"
+                  >{{ media.status === 'uploading' ? '上传中' : media.status === 'error' ? '失败' :
+                  '已就绪' }}</span
+                >
               </div>
               <div
-                v-else-if="media.type === 'audio'"
-                class="w-16 h-16 md:w-20 md:h-20 rounded-lg overflow-hidden border border-gray-200 bg-blue-50 flex flex-col items-center justify-center shadow-sm"
+                v-if="media.status === 'uploading'"
+                class="absolute inset-0 rounded-lg bg-white bg-opacity-70 flex items-center justify-center text-[11px] font-semibold text-blue-700"
               >
-                <svg
-                  class="w-6 h-6 text-blue-500 mb-1"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-                  ></path>
-                </svg>
-                <span class="text-[10px] text-blue-700">语音记录</span>
+                上传中
               </div>
               <button
                 @click="removePendingMedia(idx)"
@@ -972,9 +963,11 @@
             <!-- Media Upload Button -->
             <button
               type="button"
-              @click="$refs.mediaInput.click()"
-              class="p-3 md:p-4 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors border border-transparent hover:border-blue-100 flex-shrink-0"
-              title="上传图片、视频或音频文件"
+              @click="isAnyMultimodalEnabled && $refs.mediaInput.click()"
+              class="p-3 md:p-4 rounded-xl transition-colors border border-transparent flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+              :class="isAnyMultimodalEnabled ? 'text-gray-500 hover:text-blue-600 hover:bg-blue-50 hover:border-blue-100' : 'text-gray-300 bg-gray-50'"
+              :disabled="!isAnyMultimodalEnabled"
+              :title="isAnyMultimodalEnabled ? '上传图片、视频、音频或文件' : '当前模型配置未启用多模态上传'"
             >
               <svg
                 class="w-6 h-6 md:w-7 md:h-7"
@@ -994,7 +987,7 @@
               type="file"
               ref="mediaInput"
               @change="handleMediaUpload"
-              accept="image/*,video/*,audio/*"
+              :accept="acceptedUploadMimeTypes"
               class="hidden"
               multiple
             />
@@ -1066,8 +1059,8 @@
                 v-if="!isGenerating"
                 type="submit"
                 class="absolute inset-0 w-full h-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-colors disabled:opacity-45 disabled:cursor-not-allowed disabled:bg-blue-400 disabled:hover:bg-blue-400 flex items-center justify-center gap-2 shadow-md hover:shadow-lg"
-                :disabled="(!inputPrompt.trim() && pendingMedia.length === 0)"
-                :aria-disabled="(!inputPrompt.trim() && pendingMedia.length === 0) ? 'true' : 'false'"
+                :disabled="!canSendMessage"
+                :aria-disabled="!canSendMessage ? 'true' : 'false'"
               >
                 <span class="hidden md:inline text-lg">发送</span>
                 <svg
@@ -1104,4 +1097,3 @@
     <script type="module" src="./frontend/app.js"></script>
   </body>
 </html>
-

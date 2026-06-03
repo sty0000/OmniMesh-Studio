@@ -5,6 +5,7 @@ import {
   applyFrontendConfigPayload,
   createAgentTaskState,
   applyAgentEventToState,
+  createMultimodalContent,
 } from './frontend/state.js';
 import { createApiModule } from './frontend/api.js';
 import { createMarkdownHelpers } from './frontend/rendering.js';
@@ -23,6 +24,12 @@ describe('frontend config state helpers', () => {
         maxModelLen: 131072,
         requiresApiKey: false,
         webAuthBypassEnabled: true,
+        multimodal: {
+          maxAttachments: 4,
+          kinds: {
+            image: { enabled: true, maxBytes: 10485760, acceptedMimeTypes: ['image/png'] },
+          },
+        },
       },
     });
 
@@ -32,8 +39,42 @@ describe('frontend config state helpers', () => {
     expect(config.requiresApiKey).toBe(false);
     expect(config.webAuthBypassEnabled).toBe(true);
     expect(config.agentTasksEnabled).toBe(false);
+    expect(config.multimodal.kinds.image.enabled).toBe(true);
+    expect(config.multimodal.kinds.image.acceptedMimeTypes).toEqual(['image/png']);
     expect(maxModelLenSource.value).toBe('config');
   });
+});
+
+it('builds OpenAI-compatible multimodal content items', () => {
+  const content = createMultimodalContent({
+    prompt: 'describe this',
+    mediaItems: [
+      { type: 'image', url: 'data:image/png;base64,abc' },
+      { type: 'audio', url: 'data:audio/webm;base64,abc' },
+      { type: 'video', url: 'data:video/mp4;base64,abc' },
+      {
+        type: 'file',
+        url: 'data:text/plain;base64,abc',
+        name: 'note.txt',
+        mimeType: 'text/plain',
+      },
+    ],
+  });
+
+  expect(content).toEqual([
+    { type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } },
+    { type: 'audio_url', audio_url: { url: 'data:audio/webm;base64,abc' } },
+    { type: 'video_url', video_url: { url: 'data:video/mp4;base64,abc' } },
+    {
+      type: 'file_url',
+      file_url: {
+        url: 'data:text/plain;base64,abc',
+        filename: 'note.txt',
+        mime_type: 'text/plain',
+      },
+    },
+    { type: 'text', text: 'describe this' },
+  ]);
 });
 
 describe('frontend api module', () => {
@@ -60,6 +101,43 @@ describe('frontend api module', () => {
     expect(fetchImpl).toHaveBeenCalledWith('/frontend/config', {
       headers: { Accept: 'application/json' },
     });
+  });
+
+  it('uploads frontend files through multipart endpoint', async () => {
+    const fetchImpl = vi.fn(async (url, options) => {
+      expect(url).toBe('/frontend/uploads');
+      expect(options.method).toBe('POST');
+      expect(options.headers.Authorization).toBe('Bearer secret');
+      expect(options.headers['X-Client-Source']).toBe('web');
+      expect(options.body).toBeInstanceOf(FormData);
+      return {
+        ok: true,
+        json: async () => ({
+          files: [
+            {
+              id: 'upload_1',
+              kind: 'image',
+              name: 'a.png',
+              mimeType: 'image/png',
+              sizeBytes: 3,
+              dataUrl: 'data:image/png;base64,abc',
+            },
+          ],
+        }),
+      };
+    });
+    const api = createApiModule({
+      fetchImpl,
+      AbortSignalImpl: AbortSignal,
+      console,
+    });
+
+    const files = await api.uploadFrontendFiles({
+      apiKey: 'secret',
+      files: [new File(['abc'], 'a.png', { type: 'image/png' })],
+    });
+
+    expect(files[0].dataUrl).toBe('data:image/png;base64,abc');
   });
 
   it('does not probe protected model endpoint without explicit api key', async () => {

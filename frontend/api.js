@@ -1,8 +1,4 @@
-export const createApiModule = ({
-  fetchImpl,
-  AbortSignalImpl,
-  console,
-}) => {
+export const createApiModule = ({ fetchImpl, AbortSignalImpl, console }) => {
   const parseSse = async ({ response, onEvent }) => {
     const reader = response.body?.getReader?.();
     if (!reader) {
@@ -76,7 +72,42 @@ export const createApiModule = ({
     }
   };
 
-  const runAgentTask = async ({ apiBase, apiKey, input, sessionId, requestId, traceId, onEvent }) => {
+  const uploadFrontendFiles = async ({ files, apiKey }) => {
+    const formData = new FormData();
+    files.forEach((file) => formData.append('files', file));
+
+    const headers = { 'X-Client-Source': 'web' };
+    if (apiKey) {
+      headers.Authorization = `Bearer ${apiKey}`;
+    }
+
+    const response = await fetchImpl('/frontend/uploads', {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = payload?.error?.message || `Upload failed: HTTP ${response.status}`;
+      const error = new Error(message);
+      error.type = payload?.error?.type || 'upload_failed';
+      error.status = response.status;
+      throw error;
+    }
+
+    return payload.files || [];
+  };
+
+  const runAgentTask = async ({
+    apiBase,
+    apiKey,
+    input,
+    sessionId,
+    requestId,
+    traceId,
+    onEvent,
+  }) => {
     if (!apiKey) {
       throw new Error('API key is required for agent tasks');
     }
@@ -108,6 +139,7 @@ export const createApiModule = ({
     loadFrontendConfig,
     loadModelInfoFromApi,
     reconnectProbe,
+    uploadFrontendFiles,
     runAgentTask,
   };
 };

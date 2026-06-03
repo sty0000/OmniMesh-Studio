@@ -5,10 +5,15 @@ const path = require('node:path');
 const { pipeline, Readable } = require('node:stream');
 const { URL } = require('node:url');
 const { createAgentService } = require('./agent.service.js');
+const Busboy = require('busboy');
 const { encodeSseData } = require('./agent.protocol.js');
 
 const INSECURE_KEY_VALUES = new Set(['', 'change-me-in-production', 'changeme', 'default']);
-const WEB_BYPASS_PATHS = new Set(['GET:/v1/models', 'POST:/v1/chat/completions']);
+const WEB_BYPASS_PATHS = new Set([
+  'GET:/v1/models',
+  'POST:/v1/chat/completions',
+  'POST:/frontend/uploads',
+]);
 const LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
 const MIME_TYPES = {
@@ -36,6 +41,67 @@ const splitUpstreamBases = (value) =>
 const normalizeUpstreamBase = (value) => {
   const trimmed = String(value || '').trim();
   return trimmed ? trimmed.replace(/\/+$/, '') : '';
+};
+
+const parseBooleanEnv = (value, defaultValue = false) => {
+  if (value === undefined || value === null || value === '') return defaultValue;
+  return String(value).trim().toLowerCase() === 'true';
+};
+
+const mbToBytes = (value, defaultMb) => {
+  const mb = Number(value || defaultMb);
+  return Math.max(0, Math.floor(mb * 1024 * 1024));
+};
+
+const ACCEPTED_MULTIMODAL_MIME_TYPES = {
+  image: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+  audio: ['audio/wav', 'audio/mpeg', 'audio/mp4', 'audio/webm', 'audio/ogg'],
+  video: ['video/mp4', 'video/webm', 'video/quicktime'],
+  file: ['application/pdf', 'text/plain', 'text/csv', 'application/json'],
+};
+
+const detectUploadKind = (mimeType) => {
+  const normalized = String(mimeType || '').toLowerCase();
+  if (ACCEPTED_MULTIMODAL_MIME_TYPES.image.includes(normalized)) return 'image';
+  if (ACCEPTED_MULTIMODAL_MIME_TYPES.audio.includes(normalized)) return 'audio';
+  if (ACCEPTED_MULTIMODAL_MIME_TYPES.video.includes(normalized)) return 'video';
+  if (ACCEPTED_MULTIMODAL_MIME_TYPES.file.includes(normalized)) return 'file';
+  return null;
+};
+
+const createMultimodalConfig = (env = process.env) => {
+  const limits = {
+    image: mbToBytes(env.MULTIMODAL_MAX_IMAGE_MB, 10),
+    audio: mbToBytes(env.MULTIMODAL_MAX_AUDIO_MB, 25),
+    video: mbToBytes(env.MULTIMODAL_MAX_VIDEO_MB, 100),
+    file: mbToBytes(env.MULTIMODAL_MAX_FILE_MB, 25),
+  };
+
+  return {
+    maxAttachments: Number(env.MULTIMODAL_MAX_ATTACHMENTS || 4),
+    kinds: {
+      image: {
+        enabled: parseBooleanEnv(env.MULTIMODAL_IMAGE_ENABLED, false),
+        maxBytes: limits.image,
+        acceptedMimeTypes: ACCEPTED_MULTIMODAL_MIME_TYPES.image,
+      },
+      audio: {
+        enabled: parseBooleanEnv(env.MULTIMODAL_AUDIO_ENABLED, false),
+        maxBytes: limits.audio,
+        acceptedMimeTypes: ACCEPTED_MULTIMODAL_MIME_TYPES.audio,
+      },
+      video: {
+        enabled: parseBooleanEnv(env.MULTIMODAL_VIDEO_ENABLED, false),
+        maxBytes: limits.video,
+        acceptedMimeTypes: ACCEPTED_MULTIMODAL_MIME_TYPES.video,
+      },
+      file: {
+        enabled: parseBooleanEnv(env.MULTIMODAL_FILE_ENABLED, false),
+        maxBytes: limits.file,
+        acceptedMimeTypes: ACCEPTED_MULTIMODAL_MIME_TYPES.file,
+      },
+    },
+  };
 };
 
 const createGatewayConfig = (env = process.env) => ({
@@ -67,6 +133,7 @@ const createGatewayConfig = (env = process.env) => ({
   enableWebAuthBypass: String(env.ENABLE_WEB_AUTH_BYPASS || 'false') === 'true',
   allowInsecureDefaultKey: String(env.ALLOW_INSECURE_DEFAULT_KEY || 'false') === 'true',
   enableAgentTasks: String(env.ENABLE_AGENT_TASKS || 'true') === 'true',
+  multimodal: createMultimodalConfig(env),
 });
 
 const createInitialMetrics = () => ({
@@ -87,6 +154,9 @@ const createInitialMetrics = () => ({
   queueActiveMsTotal: 0,
   queueLastBecameNonZeroAt: null,
   queuePeakSinceBoot: 0,
+  totalUploads: 0,
+  totalUploadBytes: 0,
+  totalUploadErrors: 0,
 });
 
 const hasSecureTeamKey = (config) => {
@@ -136,6 +206,27 @@ const createGatewayServer = ({
   const waitQueue = [];
   const requestLatencyRing = [];
   const upstreamFailureUntil = new Map();
+  const upstreamStats = new Map(
+    config.vllmBases.map((base) => [
+      base,
+      {
+        base,
+        attempts: 0,
+        successes: 0,
+        failures: 0,
+        status2xx: 0,
+        status4xx: 0,
+        status5xx: 0,
+        timeouts: 0,
+        totalLatencyMs: 0,
+        lastStatusCode: null,
+        lastError: null,
+        lastAttemptAt: null,
+        lastSuccessAt: null,
+        lastFailureAt: null,
+      },
+    ]),
+  );
   let upstreamCursor = 0;
 
   const recordApiOutcome = (statusCode) => {
@@ -159,7 +250,10 @@ const createGatewayServer = ({
   const percentileFromRing = (source, p) => {
     if (!source.length) return 0;
     const sorted = [...source].sort((a, b) => a - b);
-    const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
+    const index = Math.min(
+      sorted.length - 1,
+      Math.max(0, Math.ceil((p / 100) * sorted.length) - 1),
+    );
     return sorted[index];
   };
 
@@ -228,6 +322,13 @@ const createGatewayServer = ({
       return true;
     }
     return isValidTeamBearer(req.headers.authorization || '', { allowWhenUnconfigured: false });
+  };
+
+  const isUploadAuthorized = (req, pathname) => {
+    if (isValidTeamBearer(req.headers.authorization || '', { allowWhenUnconfigured: false })) {
+      return true;
+    }
+    return canBypassWithWebContext(req, pathname);
   };
 
   const isReadyAuthorized = (req) => {
@@ -369,7 +470,11 @@ const createGatewayServer = ({
     const headers = {};
     upstream.headers.forEach((value, key) => {
       const lower = key.toLowerCase();
-      if (lower === 'content-length' || lower === 'content-encoding' || lower === 'transfer-encoding') {
+      if (
+        lower === 'content-length' ||
+        lower === 'content-encoding' ||
+        lower === 'transfer-encoding'
+      ) {
         return;
       }
       headers[key] = value;
@@ -405,15 +510,114 @@ const createGatewayServer = ({
     return Number.isFinite(until) && until > now();
   };
 
+  const getUpstreamCircuitUntil = (base) => {
+    const until = upstreamFailureUntil.get(base);
+    return Number.isFinite(until) && until > now() ? Math.round(until) : null;
+  };
+
+  const getUpstreamStats = (base) => {
+    if (!upstreamStats.has(base)) {
+      upstreamStats.set(base, {
+        base,
+        attempts: 0,
+        successes: 0,
+        failures: 0,
+        status2xx: 0,
+        status4xx: 0,
+        status5xx: 0,
+        timeouts: 0,
+        totalLatencyMs: 0,
+        lastStatusCode: null,
+        lastError: null,
+        lastAttemptAt: null,
+        lastSuccessAt: null,
+        lastFailureAt: null,
+      });
+    }
+    return upstreamStats.get(base);
+  };
+
+  const recordUpstreamAttempt = (base) => {
+    const item = getUpstreamStats(base);
+    item.attempts += 1;
+    item.lastAttemptAt = Date.now();
+  };
+
+  const addUpstreamLatency = (item, latencyMs) => {
+    if (Number.isFinite(latencyMs) && latencyMs >= 0) {
+      item.totalLatencyMs += latencyMs;
+    }
+  };
+
+  const recordUpstreamSuccess = (base, statusCode, latencyMs) => {
+    const item = getUpstreamStats(base);
+    item.successes += 1;
+    item.lastSuccessAt = Date.now();
+    item.lastStatusCode = statusCode;
+    item.lastError = null;
+    addUpstreamLatency(item, latencyMs);
+
+    if (statusCode >= 200 && statusCode < 300) item.status2xx += 1;
+    else if (statusCode >= 400 && statusCode < 500) item.status4xx += 1;
+    else if (statusCode >= 500) item.status5xx += 1;
+  };
+
+  const recordUpstreamFailure = (
+    base,
+    { statusCode = null, error = null, timeout = false, latencyMs = 0 } = {},
+  ) => {
+    const item = getUpstreamStats(base);
+    item.failures += 1;
+    item.lastFailureAt = Date.now();
+    item.lastStatusCode = statusCode;
+    item.lastError = error ? String(error).slice(0, 200) : null;
+    if (timeout) item.timeouts += 1;
+    addUpstreamLatency(item, latencyMs);
+
+    if (statusCode >= 400 && statusCode < 500) item.status4xx += 1;
+    else if (statusCode >= 500) item.status5xx += 1;
+  };
+
+  const getUpstreamSnapshot = () =>
+    config.vllmBases.map((base) => {
+      const item = getUpstreamStats(base);
+      const circuitOpen = isUpstreamTemporarilyUnavailable(base);
+      return {
+        base,
+        circuitOpen,
+        circuitUntil: getUpstreamCircuitUntil(base),
+        readyCandidate: !circuitOpen,
+        attempts: item.attempts,
+        successes: item.successes,
+        failures: item.failures,
+        successRate: item.attempts > 0 ? Number((item.successes / item.attempts).toFixed(4)) : null,
+        status2xx: item.status2xx,
+        status4xx: item.status4xx,
+        status5xx: item.status5xx,
+        timeouts: item.timeouts,
+        averageLatencyMs:
+          item.attempts > 0 ? Math.round(item.totalLatencyMs / item.attempts) : null,
+        lastStatusCode: item.lastStatusCode,
+        lastError: item.lastError,
+        lastAttemptAt: item.lastAttemptAt,
+        lastSuccessAt: item.lastSuccessAt,
+        lastFailureAt: item.lastFailureAt,
+      };
+    });
+
   const markUpstreamTemporarilyUnavailable = (base) => {
-    upstreamFailureUntil.set(base, now() + Math.max(5000, Math.min(config.upstreamTimeoutMs, 30000)));
+    upstreamFailureUntil.set(
+      base,
+      now() + Math.max(5000, Math.min(config.upstreamTimeoutMs, 30000)),
+    );
   };
 
   const clearUpstreamFailure = (base) => {
     upstreamFailureUntil.delete(base);
   };
 
-  const getReadyUpstreams = () => config.vllmBases.filter((base) => !isUpstreamTemporarilyUnavailable(base));
+  const getReadyUpstreams = () =>
+    config.vllmBases.filter((base) => !isUpstreamTemporarilyUnavailable(base));
 
   const handleProxyApi = async (req, res, pathname) => {
     metrics.totalApiRequests += 1;
@@ -463,12 +667,7 @@ const createGatewayServer = ({
 
     const gotGlobalSlot = await acquireGlobalSlotWithQueue();
     if (!gotGlobalSlot) {
-      openAiError(
-        res,
-        429,
-        'server_busy',
-        'Server is busy. Queue timeout exceeded, please retry.',
-      );
+      openAiError(res, 429, 'server_busy', 'Server is busy. Queue timeout exceeded, please retry.');
       addRequestLatency(now() - requestStartMs);
       return;
     }
@@ -489,6 +688,8 @@ const createGatewayServer = ({
         }
 
         try {
+          const upstreamStartMs = now();
+          recordUpstreamAttempt(base);
           const upstreamUrl = new URL(pathname + query, base);
           const upstream = await fetchImpl(upstreamUrl, {
             method: req.method,
@@ -498,16 +699,28 @@ const createGatewayServer = ({
             duplex: hasBody ? 'half' : undefined,
           });
 
+          const upstreamLatencyMs = now() - upstreamStartMs;
           if (upstream.ok) {
+            recordUpstreamSuccess(base, upstream.status, upstreamLatencyMs);
             clearUpstreamFailure(base);
-          } else if (upstream.status >= 500) {
-            markUpstreamTemporarilyUnavailable(base);
+          } else {
+            recordUpstreamFailure(base, {
+              statusCode: upstream.status,
+              latencyMs: upstreamLatencyMs,
+            });
+            if (upstream.status >= 500) {
+              markUpstreamTemporarilyUnavailable(base);
+            }
           }
 
           pipeFetchResponse(upstream, res);
           return;
         } catch (err) {
           lastError = err;
+          recordUpstreamFailure(base, {
+            error: (err && err.message) || 'Failed to reach vLLM upstream.',
+            timeout: Boolean(err && err.name === 'TimeoutError'),
+          });
           markUpstreamTemporarilyUnavailable(base);
         }
       }
@@ -586,8 +799,7 @@ const createGatewayServer = ({
   };
 
   const buildMetricsPayload = () => {
-    const totalApiOutcomes =
-      metrics.totalApiSuccess2xx + metrics.totalApi4xx + metrics.totalApi5xx;
+    const totalApiOutcomes = metrics.totalApiSuccess2xx + metrics.totalApi4xx + metrics.totalApi5xx;
     const queueActiveMsCurrent =
       metrics.queueLastBecameNonZeroAt === null
         ? metrics.queueActiveMsTotal
@@ -596,7 +808,9 @@ const createGatewayServer = ({
     const p95LatencyMs = percentileFromRing(requestLatencyRing, 95);
     const avgLatencyMs =
       requestLatencyRing.length > 0
-        ? Math.round(requestLatencyRing.reduce((sum, item) => sum + item, 0) / requestLatencyRing.length)
+        ? Math.round(
+            requestLatencyRing.reduce((sum, item) => sum + item, 0) / requestLatencyRing.length,
+          )
         : 0;
 
     return {
@@ -608,7 +822,8 @@ const createGatewayServer = ({
         rateBucketSize: rateBuckets.size,
         totalApiOutcomes,
         rates: {
-          api5xxRatio: totalApiOutcomes > 0 ? Number((metrics.totalApi5xx / totalApiOutcomes).toFixed(4)) : 0,
+          api5xxRatio:
+            totalApiOutcomes > 0 ? Number((metrics.totalApi5xx / totalApiOutcomes).toFixed(4)) : 0,
           api429Ratio:
             metrics.totalApiRequests > 0
               ? Number((metrics.totalRateLimited / metrics.totalApiRequests).toFixed(4))
@@ -622,9 +837,12 @@ const createGatewayServer = ({
         queue: {
           activeMsTotal: queueActiveMsCurrent,
           currentContinuousMs:
-            metrics.queueLastBecameNonZeroAt === null ? 0 : now() - metrics.queueLastBecameNonZeroAt,
+            metrics.queueLastBecameNonZeroAt === null
+              ? 0
+              : now() - metrics.queueLastBecameNonZeroAt,
           peakSinceBoot: metrics.queuePeakSinceBoot,
         },
+        upstreams: getUpstreamSnapshot(),
       },
     };
   };
@@ -659,12 +877,19 @@ const createGatewayServer = ({
     try {
       const readyUpstreams = getReadyUpstreams();
       if (readyUpstreams.length === 0) {
-        writeJson(res, 503, { ok: false, ready: false, error: 'upstream_unreachable' });
+        writeJson(res, 503, {
+          ok: false,
+          ready: false,
+          error: 'upstream_unreachable',
+          upstreams: getUpstreamSnapshot(),
+        });
         return;
       }
 
       for (const base of readyUpstreams) {
         try {
+          const upstreamStartMs = now();
+          recordUpstreamAttempt(base);
           const upstreamUrl = new URL('/v1/models', base);
           const upstream = await fetchImpl(upstreamUrl, {
             method: 'GET',
@@ -675,26 +900,65 @@ const createGatewayServer = ({
             signal: AbortSignal.timeout(config.upstreamTimeoutMs),
           });
 
+          const upstreamLatencyMs = now() - upstreamStartMs;
           if (upstream.ok) {
+            recordUpstreamSuccess(base, upstream.status, upstreamLatencyMs);
             clearUpstreamFailure(base);
-            writeJson(res, 200, { ok: true, ready: true, upstream: base });
+            writeJson(res, 200, {
+              ok: true,
+              ready: true,
+              upstream: base,
+              upstreams: getUpstreamSnapshot(),
+            });
             return;
           }
 
+          recordUpstreamFailure(base, {
+            statusCode: upstream.status,
+            latencyMs: upstreamLatencyMs,
+          });
           if (upstream.status >= 500) {
             markUpstreamTemporarilyUnavailable(base);
           }
-        } catch {
+        } catch (err) {
+          recordUpstreamFailure(base, {
+            error: (err && err.message) || 'Failed to reach vLLM upstream.',
+            timeout: Boolean(err && err.name === 'TimeoutError'),
+          });
           markUpstreamTemporarilyUnavailable(base);
         }
       }
 
-      writeJson(res, 503, { ok: false, ready: false, error: 'upstream_not_ready' });
+      writeJson(res, 503, {
+        ok: false,
+        ready: false,
+        error: 'upstream_not_ready',
+        upstreams: getUpstreamSnapshot(),
+      });
     } catch {
-      writeJson(res, 503, { ok: false, ready: false, error: 'upstream_unreachable' });
+      writeJson(res, 503, {
+        ok: false,
+        ready: false,
+        error: 'upstream_unreachable',
+        upstreams: getUpstreamSnapshot(),
+      });
     }
   };
 
+  const getDeploymentMode = () => {
+    if (config.vllmBases.length > 1) return 'replica';
+    return 'single';
+  };
+
+  const serveHealth = (res) => {
+    writeJson(res, 200, {
+      ok: true,
+      status: 'ok',
+      uptimeMs: Date.now() - metrics.startedAt,
+      mode: getDeploymentMode(),
+      upstreamCount: config.vllmBases.length,
+    });
+  };
   const serveFrontendConfig = (res) => {
     writeJson(res, 200, {
       apiBase: '/v1',
@@ -703,7 +967,153 @@ const createGatewayServer = ({
       requiresApiKey: !config.enableWebAuthBypass,
       webAuthBypassEnabled: config.enableWebAuthBypass,
       agentTasksEnabled: config.enableAgentTasks,
+      multimodal: config.multimodal,
     });
+  };
+
+  const parseMultipartUploads = (req) =>
+    new Promise((resolve, reject) => {
+      let busboy;
+      try {
+        busboy = Busboy({
+          headers: req.headers,
+          limits: {
+            files: config.multimodal.maxAttachments + 1,
+            fileSize: Math.max(
+              ...Object.values(config.multimodal.kinds).map((item) => item.maxBytes),
+            ),
+          },
+        });
+      } catch (error) {
+        reject(
+          Object.assign(new Error('Invalid multipart form data.'), { code: 'invalid_multipart' }),
+        );
+        return;
+      }
+
+      const files = [];
+      let fileCount = 0;
+      let settled = false;
+      const fail = (code, message, statusCode = 400) => {
+        if (settled) return;
+        settled = true;
+        reject(Object.assign(new Error(message), { code, statusCode }));
+        req.unpipe(busboy);
+        req.resume();
+      };
+
+      busboy.on('file', (fieldName, stream, info) => {
+        if (fieldName !== 'files') {
+          stream.resume();
+          return;
+        }
+
+        fileCount += 1;
+        if (fileCount > config.multimodal.maxAttachments) {
+          stream.resume();
+          fail(
+            'too_many_uploads',
+            `Too many uploads. Limit=${config.multimodal.maxAttachments}.`,
+            400,
+          );
+          return;
+        }
+
+        const mimeType = String(info.mimeType || '').toLowerCase();
+        const kind = detectUploadKind(mimeType);
+        if (!kind || !config.multimodal.kinds[kind]?.enabled) {
+          stream.resume();
+          fail('invalid_upload_type', `Unsupported upload type: ${mimeType || 'unknown'}.`, 415);
+          return;
+        }
+
+        const maxBytes = config.multimodal.kinds[kind].maxBytes;
+        const chunks = [];
+        let sizeBytes = 0;
+        let tooLarge = false;
+
+        stream.on('data', (chunk) => {
+          sizeBytes += chunk.length;
+          if (sizeBytes > maxBytes) {
+            tooLarge = true;
+            stream.resume();
+            fail('upload_too_large', `Upload exceeds ${maxBytes} bytes for ${kind}.`, 413);
+            return;
+          }
+          chunks.push(chunk);
+        });
+        stream.on('limit', () => {
+          tooLarge = true;
+          fail('upload_too_large', `Upload exceeds ${maxBytes} bytes for ${kind}.`, 413);
+        });
+        stream.on('end', () => {
+          if (tooLarge || settled) return;
+          const buffer = Buffer.concat(chunks);
+          files.push({
+            id: `upload_${Date.now()}_${files.length + 1}`,
+            kind,
+            name: path.basename(String(info.filename || 'upload')),
+            mimeType,
+            sizeBytes,
+            dataUrl: `data:${mimeType};base64,${buffer.toString('base64')}`,
+          });
+        });
+      });
+
+      busboy.on('filesLimit', () => {
+        fail(
+          'too_many_uploads',
+          `Too many uploads. Limit=${config.multimodal.maxAttachments}.`,
+          400,
+        );
+      });
+      busboy.on('error', () => {
+        fail('invalid_multipart', 'Invalid multipart form data.', 400);
+      });
+      busboy.on('finish', () => {
+        if (settled) return;
+        resolve(files);
+      });
+
+      req.pipe(busboy);
+    });
+
+  const serveFrontendUploads = async (req, res, pathname) => {
+    if (req.method !== 'POST') {
+      openAiError(res, 405, 'method_not_allowed', 'Use POST for uploads.');
+      return;
+    }
+
+    if (!isUploadAuthorized(req, pathname)) {
+      metrics.totalRejectedAuth += 1;
+      openAiError(res, 401, 'invalid_api_key', 'Missing or invalid API key.');
+      return;
+    }
+
+    if (
+      !String(req.headers['content-type'] || '')
+        .toLowerCase()
+        .includes('multipart/form-data')
+    ) {
+      metrics.totalUploadErrors += 1;
+      openAiError(res, 400, 'invalid_multipart', 'Expected multipart/form-data.');
+      return;
+    }
+
+    try {
+      const files = await parseMultipartUploads(req);
+      metrics.totalUploads += files.length;
+      metrics.totalUploadBytes += files.reduce((sum, item) => sum + item.sizeBytes, 0);
+      writeJson(res, 200, { files });
+    } catch (error) {
+      metrics.totalUploadErrors += 1;
+      openAiError(
+        res,
+        error.statusCode || 400,
+        error.code || 'invalid_multipart',
+        error.message || 'Invalid multipart form data.',
+      );
+    }
   };
 
   const serveAgentTaskStream = async (req, res) => {
@@ -732,7 +1142,7 @@ const createGatewayServer = ({
 
     let body;
     try {
-      body = JSON.parse(String(await readRequestBody(req) || '{}'));
+      body = JSON.parse(String((await readRequestBody(req)) || '{}'));
     } catch {
       openAiError(res, 400, 'invalid_request_error', 'Invalid JSON body.');
       addRequestLatency(now() - requestStartMs);
@@ -805,7 +1215,7 @@ const createGatewayServer = ({
     const pathname = url.pathname;
 
     if (pathname === '/health') {
-      writeJson(res, 200, { ok: true });
+      serveHealth(res);
       return;
     }
 
@@ -821,6 +1231,11 @@ const createGatewayServer = ({
 
     if (pathname === '/frontend/config') {
       serveFrontendConfig(res);
+      return;
+    }
+
+    if (pathname === '/frontend/uploads') {
+      await serveFrontendUploads(req, res, pathname);
       return;
     }
 

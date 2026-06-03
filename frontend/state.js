@@ -6,6 +6,16 @@ export const createFrontendConfig = (reactive) =>
     apiKey: '',
     requiresApiKey: true,
     webAuthBypassEnabled: false,
+    agentTasksEnabled: false,
+    multimodal: {
+      maxAttachments: 4,
+      kinds: {
+        image: { enabled: false, maxBytes: 10 * 1024 * 1024, acceptedMimeTypes: [] },
+        audio: { enabled: false, maxBytes: 25 * 1024 * 1024, acceptedMimeTypes: [] },
+        video: { enabled: false, maxBytes: 100 * 1024 * 1024, acceptedMimeTypes: [] },
+        file: { enabled: false, maxBytes: 25 * 1024 * 1024, acceptedMimeTypes: [] },
+      },
+    },
   });
 
 export const applyFrontendConfigPayload = ({ config, maxModelLenSource, payload }) => {
@@ -17,6 +27,9 @@ export const applyFrontendConfigPayload = ({ config, maxModelLenSource, payload 
   config.requiresApiKey = payload.requiresApiKey !== false;
   config.webAuthBypassEnabled = payload.webAuthBypassEnabled === true;
   config.agentTasksEnabled = payload.agentTasksEnabled === true;
+  if (payload.multimodal && typeof payload.multimodal === 'object') {
+    config.multimodal = payload.multimodal;
+  }
   maxModelLenSource.value = 'config';
 };
 
@@ -65,7 +78,9 @@ export const applyAgentEventToState = ({ state, event }) => {
       });
       break;
     case 'tool.call.finished': {
-      const match = state.toolCalls.find((item) => item.tool_call_id === event.payload?.tool_call_id);
+      const match = state.toolCalls.find(
+        (item) => item.tool_call_id === event.payload?.tool_call_id,
+      );
       if (match) {
         match.status = 'completed';
         match.output = event.payload?.output ?? null;
@@ -73,7 +88,9 @@ export const applyAgentEventToState = ({ state, event }) => {
       break;
     }
     case 'tool.call.failed': {
-      const match = state.toolCalls.find((item) => item.tool_call_id === event.payload?.tool_call_id);
+      const match = state.toolCalls.find(
+        (item) => item.tool_call_id === event.payload?.tool_call_id,
+      );
       if (match) {
         match.status = 'failed';
         match.error = event.payload?.message || 'Tool call failed';
@@ -90,4 +107,33 @@ export const applyAgentEventToState = ({ state, event }) => {
     default:
       break;
   }
+};
+
+export const createMultimodalContent = ({ prompt, mediaItems = [] }) => {
+  const content = [];
+  mediaItems.forEach((media) => {
+    if (media.type === 'image') {
+      content.push({ type: 'image_url', image_url: { url: media.url } });
+    } else if (media.type === 'video') {
+      content.push({ type: 'video_url', video_url: { url: media.url } });
+    } else if (media.type === 'audio') {
+      content.push({ type: 'audio_url', audio_url: { url: media.url } });
+    } else if (media.type === 'file') {
+      content.push({
+        type: 'file_url',
+        file_url: {
+          url: media.url,
+          filename: media.name,
+          mime_type: media.mimeType,
+        },
+      });
+    }
+  });
+
+  const text = String(prompt || '').trim();
+  if (text) {
+    content.push({ type: 'text', text });
+  }
+
+  return content;
 };
