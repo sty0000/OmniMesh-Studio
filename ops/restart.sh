@@ -10,6 +10,8 @@ check_systemd
 
 sudo systemctl restart "$SERVICE_VLLM"
 sudo systemctl restart "$SERVICE_GATEWAY"
+sudo systemctl restart "$SERVICE_ALERT_TIMER"
 
-log "restarted: $SERVICE_VLLM and $SERVICE_GATEWAY"
-
+log "restarted: $SERVICE_VLLM, $SERVICE_GATEWAY, $SERVICE_ALERT_TIMER"
+log "showing current status"
+bash "$SCRIPT_DIR/status.sh"

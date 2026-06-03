@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
 check_systemd
+need_cmd rsync
 
 if [[ $EUID -ne 0 ]]; then
   echo "Please run as root: sudo bash ops/install_systemd.sh"
@@ -20,6 +21,7 @@ rsync -a --delete "$ROOT_DIR/" /opt/qwen-web/ \
 
 safe_copy_if_missing /opt/qwen-web/deploy/env/gateway.env.example /etc/qwen-web/gateway.env
 safe_copy_if_missing /opt/qwen-web/deploy/env/vllm.env.example /etc/qwen-web/vllm.env
+safe_copy_if_missing /opt/qwen-web/deploy/env/ray.env.example /etc/qwen-web/ray.env
 safe_copy_if_missing /opt/qwen-web/deploy/env/alert.env.example /etc/qwen-web/alert.env
 
 install -m 644 /opt/qwen-web/deploy/systemd/qwen-vllm.service /etc/systemd/system/qwen-vllm.service
@@ -31,4 +33,4 @@ systemctl daemon-reload
 systemctl enable qwen-vllm.service qwen-gateway.service qwen-alert.timer
 
 log "Install complete. Edit /etc/qwen-web/*.env then run: bash /opt/qwen-web/ops/start.sh"
-
+log "Check status any time with: bash /opt/qwen-web/ops/status.sh"

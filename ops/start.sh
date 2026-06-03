@@ -13,4 +13,5 @@ sudo systemctl start "$SERVICE_GATEWAY"
 sudo systemctl start "$SERVICE_ALERT_TIMER"
 
 log "started: $SERVICE_VLLM, $SERVICE_GATEWAY, $SERVICE_ALERT_TIMER"
-
+log "showing current status"
+bash "$SCRIPT_DIR/status.sh"
