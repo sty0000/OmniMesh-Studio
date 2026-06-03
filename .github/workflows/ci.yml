@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Check gateway syntax
+        run: node --check gateway.server.js
+
+      - name: Check shell scripts when Bash is available
+        shell: pwsh
+        run: |
+          $bash = Get-Command bash -ErrorAction SilentlyContinue
+          if (-not $bash) {
+            Write-Host 'Bash not available; skipping shell syntax check.'
+            exit 0
+          }
+
+          & bash --version
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host 'Bash command exists but is not usable; skipping shell syntax check.'
+            exit 0
+          }
+
+          & bash -n ops/*.sh start_gateway.sh

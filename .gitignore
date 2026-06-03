@@ -1,4 +1,4 @@
-﻿node_modules/
+node_modules/
 dist/
 coverage/
 .nyc_output/
@@ -16,12 +16,4 @@ yarn-debug.log*
 *.tsbuildinfo
 .vscode-test/
 deploy/env/*.env
-
-doc/开发计划.md
-doc/产品最终形态定义.md
-doc/更新路线图.md
-doc/执行清单-分领域.md
-doc/Agent事件流协议草案.md
-doc/形态选型决策文档.md
-doc/规划文档索引.md
-doc/底层架构升级建议.md
+doc/
