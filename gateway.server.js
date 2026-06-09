@@ -984,7 +984,7 @@ const createGatewayServer = ({
             ),
           },
         });
-      } catch (error) {
+      } catch {
         reject(
           Object.assign(new Error('Invalid multipart form data.'), { code: 'invalid_multipart' }),
         );

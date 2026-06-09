@@ -522,6 +522,25 @@ Authorization: Bearer <TEAM_API_KEY>
 
 ---
 
+## 9.1 Smoke Matrix 快速验证
+
+远程 Linux 节点可用 `ops/smoke_matrix.sh` 记录最小验证证据。脚本默认只读取状态并发送最小 API 请求，不会停止服务；故障注入仍需按 runbook 手工执行。
+
+```bash
+cd /opt/qwen-web
+SMOKE_MODEL=qwen bash ops/smoke_matrix.sh single
+SMOKE_MODEL=qwen bash ops/smoke_matrix.sh replica
+RAY_DRY_RUN=1 QWEN_WEB_ENV_DIR=/etc/qwen-web bash ops/smoke_matrix.sh ray-dry-run
+```
+
+如需图文 smoke，传入本地小图片：
+
+```bash
+SMOKE_IMAGE=/tmp/test.jpg SMOKE_MODEL=qwen bash ops/smoke_matrix.sh single
+```
+
+---
+
 ## 10. 部署模式闭环
 
 本项目支持 `single`、`replica`、`ray` 三种运行模式。先用 `ops/status.sh` 判断当前模式，再用 `/health`、`/ready`、`/internal/metrics` 验收服务状态。
